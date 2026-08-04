@@ -122,6 +122,58 @@ export async function createVideoPreview(
   }
 }
 
+/**
+ * Кадр-обложка из готового ролика.
+ *
+ * fal.ai отдаёт только видеофайл, отдельной обложки у Kling и Seedance нет.
+ * Раньше её присылал провайдер, поэтому обложку мы вырезаем сами: берём кадр
+ * на первой секунде (в самом начале ролика часто затемнение) и кладём рядом.
+ * Если ffmpeg недоступен, возвращается `null` — генерация из-за этого не падает.
+ */
+export async function extractPosterFrame(
+  source: PreviewSource,
+  log?: { warn: (message: string) => void },
+): Promise<Buffer | null> {
+  const binary = await resolveFfmpeg(log);
+  if (!binary) return null;
+  if (!source.path && !source.data) return null;
+  const directory = await mkdtemp(join(tmpdir(), 'klyvo-poster-'));
+  const output = join(directory, 'poster.jpg');
+  let input = source.path;
+  try {
+    if (!input) {
+      input = join(directory, 'input.mp4');
+      await writeFile(input, source.data as Buffer);
+    }
+    await run(
+      binary,
+      [
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-y',
+        // Перемотка до -i: ffmpeg не декодирует всё, что было до нужной секунды.
+        '-ss',
+        '1',
+        '-i',
+        input,
+        '-frames:v',
+        '1',
+        '-q:v',
+        '3',
+        output,
+      ],
+      { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 },
+    );
+    const data = await readFile(output);
+    return data.length ? data : null;
+  } catch {
+    return null;
+  } finally {
+    await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 export function feedPreviewKey(key: string) {
   const dot = key.lastIndexOf('.');
   return dot > 0 ? `${key.slice(0, dot)}_feed.mp4` : `${key}_feed.mp4`;

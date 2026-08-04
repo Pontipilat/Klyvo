@@ -3,16 +3,17 @@ import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
-import type { Language } from '@klyvo/shared';
+import { kindForMode, type Language } from '@klyvo/shared';
 import type {
+  CompletedMedia,
+  MediaGenerationInput,
+  MediaGenerationProvider,
   ModerationProvider,
   ObjectRange,
   PaymentProvider,
   Product,
   PromptEnhancementProvider,
   StorageProvider,
-  VideoGenerationInput,
-  VideoGenerationProvider,
 } from './contracts.js';
 
 const videos = [
@@ -45,14 +46,42 @@ const videos = [
   },
 ] as const;
 
-export class MockVideoGenerationProvider implements VideoGenerationProvider {
+const images = [
+  {
+    url: 'https://images.unsplash.com/photo-1485846234645-a62644f84728?w=1400&auto=format&fit=crop',
+    width: 1400,
+    height: 933,
+    fileSize: 412_000,
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=1400&auto=format&fit=crop',
+    width: 1400,
+    height: 933,
+    fileSize: 388_000,
+  },
+] as const;
+
+export class MockMediaGenerationProvider implements MediaGenerationProvider {
   readonly name = 'mock';
-  async create(_input: VideoGenerationInput) {
-    return { taskId: `mock_${randomUUID()}` };
+  /** Вид результата зашит в идентификатор задачи: у mock-провайдера другой памяти нет. */
+  async create(input: MediaGenerationInput) {
+    return { taskId: `mock_${kindForMode(input.mode)}_${randomUUID()}` };
   }
-  async result(seed: string) {
-    const index = [...seed].reduce((sum, char) => sum + char.charCodeAt(0), 0) % videos.length;
-    return videos[index] ?? videos[0];
+  async result(seed: string): Promise<CompletedMedia> {
+    const index = [...seed].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+    if (seed.startsWith('mock_IMAGE_')) {
+      const image = images[index % images.length] ?? images[0];
+      return {
+        mediaType: 'IMAGE',
+        videoUrl: image.url,
+        thumbnailUrl: image.url,
+        width: image.width,
+        height: image.height,
+        fileSize: image.fileSize,
+      };
+    }
+    const video = videos[index % videos.length] ?? videos[0];
+    return { mediaType: 'VIDEO', ...video };
   }
   async cancel(_taskId: string) {}
 }

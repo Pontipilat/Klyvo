@@ -67,7 +67,9 @@ export const mediaRoutes: FastifyPluginAsync = async (fastify) => {
 
     const key = kind === 'thumbnail' ? await resolveThumbnailKey(storedKey, request.log) : storedKey;
     const size = await storageProvider.size(key);
-    const mimeType = kind === 'thumbnail' ? 'image/jpeg' : 'video/mp4';
+    // Картинки сохраняются в JPEG, поэтому по всем трём адресам у них один тип.
+    const mimeType =
+      kind === 'thumbnail' || video.mediaType === 'IMAGE' ? 'image/jpeg' : 'video/mp4';
 
     reply
       .type(mimeType)

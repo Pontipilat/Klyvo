@@ -111,7 +111,8 @@ export default function FeedScreen() {
         ),
         thumbnailUrl: item.video.thumbnailUrl,
         // Кладка использует это, чтобы заранее прогреть начало ролика.
-        videoUrl: item.video.videoUrl,
+        // У картинки проигрывать нечего — плитка остаётся статичной.
+        videoUrl: item.video.mediaType === 'IMAGE' ? '' : item.video.videoUrl,
         source: item,
       })),
     [feed.data?.pages],
@@ -371,7 +372,7 @@ export default function FeedScreen() {
             <KlyvoFeedTile
               item={{
                 id: item.id,
-                videoUrl: item.video.videoUrl,
+                videoUrl: item.video.mediaType === 'IMAGE' ? '' : item.video.videoUrl,
                 thumbnailUrl: item.video.thumbnailUrl,
                 width: tile.width,
                 height: tile.height,

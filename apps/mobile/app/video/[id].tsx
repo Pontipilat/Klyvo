@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -18,7 +18,12 @@ import {
   Share2,
   Trash2,
 } from 'lucide-react-native';
-import { findVideoModel, type GenerationInput, type PublicationSettingsDto } from '@klyvo/shared';
+import {
+  findGenerationModel,
+  type GenerationInput,
+  type GenerationKind,
+  type PublicationSettingsDto,
+} from '@klyvo/shared';
 import { apiRequest } from '../../src/api/client';
 import {
   KlyvoBottomSheet,
@@ -41,6 +46,7 @@ import { colors, fonts, radii, spacing } from '../../src/theme';
 
 interface VideoDetail {
   id: string;
+  mediaType?: GenerationKind;
   videoUrl: string;
   thumbnailUrl: string;
   duration: number;
@@ -238,8 +244,16 @@ export default function VideoScreen() {
     router.push('/(tabs)/create');
   };
 
-  const durationLabel = `${video.duration.toFixed(video.duration % 1 ? 1 : 0)} ${t('seconds')}`;
-  const modelLabel = findVideoModel(video.generation.modelId)?.label ?? t('model');
+  const isImage = video.mediaType === 'IMAGE';
+  const mediaRatio = sizeFromAspectRatio(
+    video.generation.aspectRatio,
+    video.width,
+    video.height,
+  );
+  const durationLabel = isImage
+    ? t('imageResult')
+    : `${video.duration.toFixed(video.duration % 1 ? 1 : 0)} ${t('seconds')}`;
+  const modelLabel = findGenerationModel(video.generation.modelId)?.label ?? t('model');
 
   return (
     <KlyvoScreen>
@@ -271,11 +285,19 @@ export default function VideoScreen() {
       </Text>
 
       {/* Формат генерации надёжнее размеров из ответа провайдера — см. sizeFromAspectRatio. */}
-      <KlyvoVideoPlayer
-        uri={video.videoUrl}
-        autoplay
-        {...sizeFromAspectRatio(video.generation.aspectRatio, video.width, video.height)}
-      />
+      {isImage ? (
+        <Image
+          source={{ uri: video.videoUrl }}
+          resizeMode="contain"
+          style={[styles.image, { aspectRatio: mediaRatio.width / mediaRatio.height }]}
+        />
+      ) : (
+        <KlyvoVideoPlayer
+          uri={video.videoUrl}
+          autoplay
+          {...sizeFromAspectRatio(video.generation.aspectRatio, video.width, video.height)}
+        />
+      )}
 
       {video.mine ? (
         <View style={styles.primaryActions}>
@@ -472,6 +494,13 @@ export default function VideoScreen() {
 }
 
 const styles = StyleSheet.create({
+  image: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    width: '100%',
+  },
   top: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   badge: {
     backgroundColor: colors.surfaceRaised,

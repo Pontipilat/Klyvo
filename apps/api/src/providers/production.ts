@@ -12,14 +12,11 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { Language } from '@klyvo/shared';
 import { config } from '../config.js';
 import type {
-  CompletedVideo,
   ObjectRange,
   PaymentProvider,
   Product,
   PromptEnhancementProvider,
   StorageProvider,
-  VideoGenerationInput,
-  VideoGenerationProvider,
 } from './contracts.js';
 
 export class ProviderRequestError extends Error {
@@ -86,149 +83,6 @@ async function jsonRequest<T>(
     );
   }
   return payload as T;
-}
-
-interface ArkTask {
-  id?: string;
-  task_id?: string;
-  status?: string;
-  content?:
-    | {
-        video_url?: string;
-        thumbnail_url?: string;
-        cover_url?: string;
-        last_frame_url?: string;
-        width?: number;
-        height?: number;
-        file_size?: number;
-      }
-    | Array<Record<string, unknown>>;
-  result?: Record<string, unknown>;
-}
-
-function arkContent(task: ArkTask) {
-  if (Array.isArray(task.content)) {
-    return task.content.find((item) => typeof item.video_url === 'string') ?? {};
-  }
-  return task.content ?? task.result ?? {};
-}
-
-function promptForSeedance(input: VideoGenerationInput) {
-  const details = [input.enhancedPrompt || input.prompt];
-  if (input.style !== 'NONE') details.push(`Visual style: ${input.style.toLowerCase()}.`);
-  if (input.cameraMotion !== 'AUTO') {
-    details.push(`Camera movement: ${input.cameraMotion.toLowerCase().replaceAll('_', ' ')}.`);
-  }
-  return details.join(' ');
-}
-
-export class SeedanceProvider implements VideoGenerationProvider {
-  readonly name = 'modelark-seedance';
-  private readonly apiKey = required(config.SEEDANCE_API_KEY, 'SEEDANCE_API_KEY');
-  private readonly baseUrl = config.SEEDANCE_BASE_URL.replace(/\/$/u, '');
-
-  async create(input: VideoGenerationInput) {
-    const content: Array<Record<string, unknown>> = [
-      { type: 'text', text: promptForSeedance(input) },
-    ];
-    if (input.firstFrameUrl) {
-      content.push({
-        type: 'image_url',
-        image_url: { url: input.firstFrameUrl },
-        role: 'first_frame',
-      });
-    }
-    if (input.lastFrameUrl) {
-      content.push({
-        type: 'image_url',
-        image_url: { url: input.lastFrameUrl },
-        role: 'last_frame',
-      });
-    }
-    const usesFrames = input.timingMode === 'FRAMES';
-    const timing = usesFrames ? { frames: input.frames } : { duration: input.duration };
-    const task = await jsonRequest<ArkTask>(
-      'ModelArk',
-      `${this.baseUrl}/contents/generations/tasks`,
-      this.apiKey,
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          model: usesFrames ? config.SEEDANCE_FRAMES_MODEL : config.SEEDANCE_MODEL,
-          content,
-          ratio: input.aspectRatio === 'SMART' ? 'adaptive' : input.aspectRatio,
-          ...timing,
-          resolution: input.resolution,
-          camera_fixed: input.cameraMotion === 'STATIC',
-          ...(usesFrames ? {} : { generate_audio: input.generateAudio }),
-          return_last_frame: true,
-          watermark: false,
-        }),
-      },
-    );
-    const taskId = task.id ?? task.task_id;
-    if (!taskId) throw new ProviderRequestError('ModelArk', 502, 'ModelArk returned no task id');
-    return { taskId };
-  }
-
-  async result(taskId: string): Promise<CompletedVideo | null> {
-    const task = await jsonRequest<ArkTask>(
-      'ModelArk',
-      `${this.baseUrl}/contents/generations/tasks/${encodeURIComponent(taskId)}`,
-      this.apiKey,
-    );
-    const status = task.status?.toLowerCase();
-    if (!status || ['queued', 'pending', 'running', 'processing'].includes(status)) return null;
-    if (!['succeeded', 'success', 'completed'].includes(status)) {
-      throw new ProviderRequestError(
-        'ModelArk',
-        502,
-        providerMessage(task, `Task ${status}`),
-        true,
-      );
-    }
-    const content = arkContent(task);
-    const videoUrl = typeof content.video_url === 'string' ? content.video_url : undefined;
-    if (!videoUrl) {
-      throw new ProviderRequestError('ModelArk', 502, 'Completed task returned no video URL');
-    }
-    const thumbnail = [content.thumbnail_url, content.cover_url, content.last_frame_url].find(
-      (value): value is string => typeof value === 'string' && value.length > 0,
-    );
-    if (!thumbnail) {
-      throw new ProviderRequestError(
-        'ModelArk',
-        502,
-        'Completed task returned no video preview frame',
-      );
-    }
-    return {
-      videoUrl,
-      thumbnailUrl: thumbnail,
-      width: typeof content.width === 'number' ? content.width : 1280,
-      height: typeof content.height === 'number' ? content.height : 720,
-      fileSize: typeof content.file_size === 'number' ? content.file_size : 0,
-    };
-  }
-
-  async cancel(taskId: string) {
-    const response = await fetch(
-      `${this.baseUrl}/contents/generations/tasks/${encodeURIComponent(taskId)}`,
-      {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${this.apiKey}` },
-        signal: AbortSignal.timeout(30_000),
-      },
-    );
-    if (!response.ok && response.status !== 404) {
-      const payload: unknown = await response.json().catch((): unknown => ({}));
-      throw new ProviderRequestError(
-        'ModelArk',
-        response.status,
-        providerMessage(payload, `Unable to cancel task (${response.status})`),
-      );
-    }
-  }
 }
 
 interface DeepSeekResponse {

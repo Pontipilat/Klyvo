@@ -1,23 +1,28 @@
 import { resolve } from 'node:path';
 import { config } from '../config.js';
+import { FalProvider } from './fal.js';
 import {
   LocalStorageProvider,
+  MockMediaGenerationProvider,
   MockModerationProvider,
   MockPaymentProvider,
   MockPromptEnhancementProvider,
-  MockVideoGenerationProvider,
 } from './mock.js';
-import { DeepSeekProvider, S3StorageProvider, SeedanceProvider } from './production.js';
+import { DeepSeekProvider, S3StorageProvider } from './production.js';
 import type {
+  MediaGenerationProvider,
   PromptEnhancementProvider,
   StorageProvider,
-  VideoGenerationProvider,
 } from './contracts.js';
 
-export const videoGenerationProvider: VideoGenerationProvider =
-  config.PROVIDER_MODE === 'seedance' ? new SeedanceProvider() : new MockVideoGenerationProvider();
+/** Настоящие генерации включены только когда выбран режим fal и задан ключ. */
+export const liveProviders = config.PROVIDER_MODE === 'fal';
+
+export const mediaGenerationProvider: MediaGenerationProvider = liveProviders
+  ? new FalProvider()
+  : new MockMediaGenerationProvider();
 export const promptEnhancementProvider: PromptEnhancementProvider =
-  config.PROVIDER_MODE === 'seedance'
+  liveProviders && config.DEEPSEEK_API_KEY
     ? new DeepSeekProvider()
     : new MockPromptEnhancementProvider();
 export const storageProvider: StorageProvider =

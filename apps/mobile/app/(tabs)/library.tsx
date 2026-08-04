@@ -12,7 +12,7 @@ import Animated, {
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
-import type { GenerationDto } from '@klyvo/shared';
+import { kindForMode, type GenerationDto } from '@klyvo/shared';
 import { apiRequest } from '../../src/api/client';
 import {
   KlyvoChip,
@@ -194,7 +194,12 @@ function GenerationCard({
           : item.status === 'QUEUED'
             ? t('statusQueued')
             : t('statusProcessing');
+  const isImage = kindForMode(item.mode) === 'IMAGE';
   const duration = item.timingMode === 'FRAMES' && item.frames ? item.frames / 24 : item.duration;
+  // У картинки нет длительности — вместо неё показываем, что это именно картинка.
+  const meta = isImage
+    ? t('imageResult')
+    : `${duration.toFixed(duration % 1 ? 2 : 0)} ${t('seconds')}`;
   return (
     <Pressable
       onPress={onPress}
@@ -238,7 +243,7 @@ function GenerationCard({
           </Text>
         ) : null}
         <Text style={styles.itemMeta}>
-          {duration.toFixed(duration % 1 ? 2 : 0)} {t('seconds')} · {item.resolution}
+          {meta} · {item.resolution}
           {item.batchSize > 1
             ? ` · ${t('variant')} ${item.batchIndex}/${item.batchSize}`
             : ''}

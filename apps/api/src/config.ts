@@ -8,7 +8,8 @@ const envSchema = z.object({
   HOST: z.string().default('0.0.0.0'),
   JWT_SECRET: z.string().min(16).default('local-klyvo-access-secret-change-me'),
   JWT_REFRESH_SECRET: z.string().min(16).default('local-klyvo-refresh-secret-change-me'),
-  PROVIDER_MODE: z.enum(['mock', 'seedance']).default('mock'),
+  /** `fal` — настоящие генерации через fal.ai, `mock` — заглушки для разработки. */
+  PROVIDER_MODE: z.enum(['mock', 'fal']).default('mock'),
   STORAGE_MODE: z.enum(['local', 's3']).default('local'),
   PAYMENT_MODE: z.enum(['mock', 'store']).default('mock'),
   MOCK_GENERATION_SECONDS: z.coerce.number().min(0).max(120).default(10),
@@ -24,12 +25,9 @@ const envSchema = z.object({
     .transform((value) => value !== 'false'),
   /** Сколько потоков отдавать ffmpeg. Один поток не мешает API отвечать. */
   FEED_PREVIEW_THREADS: z.coerce.number().int().min(1).max(16).default(1),
-  SEEDANCE_API_KEY: z.string().min(1).optional(),
-  SEEDANCE_BASE_URL: z
-    .url()
-    .default('https://ark.ap-southeast.bytepluses.com/api/v3'),
-  SEEDANCE_MODEL: z.string().min(1).default('seedance-1-5-pro-251215'),
-  SEEDANCE_FRAMES_MODEL: z.string().min(1).default('seedance-1-0-pro-250528'),
+  /** Ключ fal.ai (Dashboard → Keys). Формат `key_id:key_secret`. */
+  FAL_KEY: z.string().min(1).optional(),
+  FAL_QUEUE_URL: z.url().default('https://queue.fal.run'),
   DEEPSEEK_API_KEY: z.string().min(1).optional(),
   DEEPSEEK_BASE_URL: z.url().default('https://api.deepseek.com'),
   DEEPSEEK_MODEL: z.string().min(1).default('deepseek-v4-flash'),

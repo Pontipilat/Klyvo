@@ -1,11 +1,13 @@
-import type { GenerationInput, Language } from '@klyvo/shared';
+import type { GenerationInput, GenerationKind, Language } from '@klyvo/shared';
 import type { Readable } from 'node:stream';
 
-export interface VideoGenerationResult {
+export interface MediaGenerationResult {
   taskId: string;
 }
 
-export interface CompletedVideo {
+export interface CompletedMedia {
+  /** VIDEO — ролик, IMAGE — картинка. Для картинки `videoUrl` ведёт на сам файл. */
+  mediaType: GenerationKind;
   videoUrl: string;
   thumbnailUrl: string;
   width: number;
@@ -13,15 +15,16 @@ export interface CompletedVideo {
   fileSize: number;
 }
 
-export interface VideoGenerationInput extends GenerationInput {
+export interface MediaGenerationInput extends GenerationInput {
   firstFrameUrl?: string;
   lastFrameUrl?: string;
 }
 
-export interface VideoGenerationProvider {
+export interface MediaGenerationProvider {
   readonly name: string;
-  create(input: VideoGenerationInput): Promise<VideoGenerationResult>;
-  result(taskId: string): Promise<CompletedVideo | null>;
+  create(input: MediaGenerationInput): Promise<MediaGenerationResult>;
+  /** `null` — задача ещё выполняется. */
+  result(taskId: string): Promise<CompletedMedia | null>;
   cancel(taskId: string): Promise<void>;
 }
 

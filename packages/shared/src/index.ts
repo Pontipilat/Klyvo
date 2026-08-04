@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-export const generationModes = ['TEXT_TO_VIDEO', 'IMAGE_TO_VIDEO'] as const;
+export const generationModes = [
+  'TEXT_TO_VIDEO',
+  'IMAGE_TO_VIDEO',
+  'TEXT_TO_IMAGE',
+  'IMAGE_TO_IMAGE',
+] as const;
 export const generationStatuses = [
   'QUEUED',
   'PROCESSING',
@@ -8,8 +13,10 @@ export const generationStatuses = [
   'FAILED',
   'CANCELED',
 ] as const;
+/** Что именно создаёт модель: ролик или картинку. */
+export const generationKinds = ['VIDEO', 'IMAGE'] as const;
 export const aspectRatios = ['SMART', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'] as const;
-export const resolutions = ['480p', '720p', '1080p'] as const;
+export const resolutions = ['480p', '720p', '1080p', '4k'] as const;
 export const timingModes = ['DURATION', 'FRAMES'] as const;
 export const styles = [
   'CINEMATIC',
@@ -34,6 +41,7 @@ export const visibilityValues = ['PRIVATE', 'UNLISTED', 'PUBLIC'] as const;
 
 export type GenerationMode = (typeof generationModes)[number];
 export type GenerationStatus = (typeof generationStatuses)[number];
+export type GenerationKind = (typeof generationKinds)[number];
 export type AspectRatio = (typeof aspectRatios)[number];
 export type Resolution = (typeof resolutions)[number];
 export type TimingMode = (typeof timingModes)[number];
@@ -42,64 +50,185 @@ export type CameraMotion = (typeof cameraMotions)[number];
 export type Language = (typeof languages)[number];
 
 /**
- * Реестр моделей генерации. Идентификатор стабилен и хранится в базе,
- * конкретное имя модели у провайдера задаётся на сервере через переменные окружения.
+ * Реестр моделей генерации.
+ *
+ * Идентификатор стабилен и хранится в базе, а `endpoints` — это адреса моделей
+ * у fal.ai: именно туда сервер отправляет запрос. Здесь же перечислены реальные
+ * возможности каждой модели, поэтому приложение показывает только те настройки,
+ * которые модель действительно принимает, и невалидный запрос не уходит на сервер.
  */
-export interface VideoModelInfo {
+export interface GenerationModelInfo {
   id: string;
+  kind: GenerationKind;
   label: string;
   provider: string;
   description: string;
+  /** Адрес модели у fal.ai для каждого поддерживаемого режима. */
+  endpoints: Partial<Record<GenerationMode, string>>;
   supportsAudio: boolean;
   supportsFrames: boolean;
-  maxDuration: number;
+  /** Модель умеет доводить ролик до заданного последнего кадра. */
+  supportsLastFrame: boolean;
+  aspectRatios: readonly AspectRatio[];
+  resolutions: readonly Resolution[];
+  durations: readonly number[];
+  /** Надбавка к базовой цене за секунду именно этой модели. */
+  priceMultiplier: number;
 }
 
-export const videoModels = [
+const KLING_ASPECT_RATIOS = ['16:9', '9:16', '1:1'] as const;
+const KLING_DURATIONS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
+const SEEDANCE_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
+
+export const generationModels = [
   {
-    id: 'seedance-1-5-pro',
-    label: 'Seedance 1.5 Pro',
-    provider: 'BytePlus ModelArk',
-    description: 'Основная модель: длительность в секундах и генерация со звуком.',
+    id: 'kling-3-standard',
+    kind: 'VIDEO',
+    label: 'Kling 3 Standard',
+    provider: 'fal.ai · Kuaishou',
+    description: 'Быстрый режим Kling 3: 720p, звук, до 15 секунд.',
+    endpoints: {
+      TEXT_TO_VIDEO: 'fal-ai/kling-video/v3/standard/text-to-video',
+      IMAGE_TO_VIDEO: 'fal-ai/kling-video/v3/standard/image-to-video',
+    },
     supportsAudio: true,
     supportsFrames: false,
-    maxDuration: 12,
+    supportsLastFrame: true,
+    aspectRatios: KLING_ASPECT_RATIOS,
+    resolutions: ['720p'],
+    durations: KLING_DURATIONS,
+    priceMultiplier: 1.2,
   },
   {
-    id: 'seedance-1-0-pro',
-    label: 'Seedance 1.0 Pro',
-    provider: 'BytePlus ModelArk',
-    description: 'Точное число кадров с шагом 4. Звук этой моделью не создаётся.',
-    supportsAudio: false,
-    supportsFrames: true,
-    maxDuration: 12,
+    id: 'kling-3-pro',
+    kind: 'VIDEO',
+    label: 'Kling 3 Pro',
+    provider: 'fal.ai · Kuaishou',
+    description: 'Кинематографичный режим Kling 3: 1080p, звук, плавное движение.',
+    endpoints: {
+      TEXT_TO_VIDEO: 'fal-ai/kling-video/v3/pro/text-to-video',
+      IMAGE_TO_VIDEO: 'fal-ai/kling-video/v3/pro/image-to-video',
+    },
+    supportsAudio: true,
+    supportsFrames: false,
+    supportsLastFrame: true,
+    aspectRatios: KLING_ASPECT_RATIOS,
+    resolutions: ['1080p'],
+    durations: KLING_DURATIONS,
+    priceMultiplier: 1.2,
   },
-] as const satisfies readonly VideoModelInfo[];
+  {
+    id: 'kling-3-4k',
+    kind: 'VIDEO',
+    label: 'Kling 3 4K',
+    provider: 'fal.ai · Kuaishou',
+    description: 'Максимальное качество Kling 3: настоящие 4K без апскейла.',
+    endpoints: {
+      TEXT_TO_VIDEO: 'fal-ai/kling-video/v3/4k/text-to-video',
+      IMAGE_TO_VIDEO: 'fal-ai/kling-video/v3/4k/image-to-video',
+    },
+    supportsAudio: true,
+    supportsFrames: false,
+    supportsLastFrame: true,
+    aspectRatios: KLING_ASPECT_RATIOS,
+    resolutions: ['4k'],
+    durations: KLING_DURATIONS,
+    priceMultiplier: 1.2,
+  },
+  {
+    id: 'seedance-2-0',
+    kind: 'VIDEO',
+    label: 'Seedance 2.0',
+    provider: 'fal.ai · ByteDance',
+    description: 'Все форматы кадра, разрешение до 4K и звук.',
+    endpoints: {
+      TEXT_TO_VIDEO: 'bytedance/seedance-2.0/text-to-video',
+      IMAGE_TO_VIDEO: 'bytedance/seedance-2.0/image-to-video',
+    },
+    supportsAudio: true,
+    supportsFrames: false,
+    supportsLastFrame: true,
+    aspectRatios: aspectRatios,
+    resolutions: resolutions,
+    durations: SEEDANCE_DURATIONS,
+    priceMultiplier: 1,
+  },
+  {
+    id: 'seedance-2-0-fast',
+    kind: 'VIDEO',
+    label: 'Seedance 2.0 Fast',
+    provider: 'fal.ai · ByteDance',
+    description: 'Тот же Seedance 2.0, но быстрее и заметно дешевле. До 720p.',
+    endpoints: {
+      TEXT_TO_VIDEO: 'bytedance/seedance-2.0/fast/text-to-video',
+      IMAGE_TO_VIDEO: 'bytedance/seedance-2.0/fast/image-to-video',
+    },
+    supportsAudio: true,
+    supportsFrames: false,
+    supportsLastFrame: true,
+    aspectRatios: aspectRatios,
+    resolutions: ['480p', '720p'],
+    durations: SEEDANCE_DURATIONS,
+    priceMultiplier: 0.6,
+  },
+  {
+    id: 'gpt-image-2',
+    kind: 'IMAGE',
+    label: 'GPT Image 2',
+    provider: 'fal.ai · OpenAI',
+    description: 'Картинки по описанию и правка загруженного изображения.',
+    endpoints: {
+      TEXT_TO_IMAGE: 'openai/gpt-image-2',
+      IMAGE_TO_IMAGE: 'openai/gpt-image-2/edit',
+    },
+    supportsAudio: false,
+    supportsFrames: false,
+    supportsLastFrame: false,
+    aspectRatios: ['SMART', '16:9', '4:3', '1:1', '3:4', '9:16'],
+    // Разрешение здесь — это уровень качества у GPT Image 2: low / medium / high.
+    resolutions: ['480p', '720p', '1080p'],
+    durations: [],
+    priceMultiplier: 1,
+  },
+] as const satisfies readonly GenerationModelInfo[];
 
-export type VideoModelId = (typeof videoModels)[number]['id'];
-export const videoModelIds = videoModels.map(({ id }) => id) as [VideoModelId, ...VideoModelId[]];
-export const defaultVideoModelId: VideoModelId = 'seedance-1-5-pro';
+export type GenerationModelId = (typeof generationModels)[number]['id'];
+export const generationModelIds = generationModels.map(({ id }) => id) as [
+  GenerationModelId,
+  ...GenerationModelId[],
+];
+export const defaultVideoModelId: GenerationModelId = 'seedance-2-0';
+export const defaultImageModelId: GenerationModelId = 'gpt-image-2';
 
-export function findVideoModel(id: string | null | undefined): VideoModelInfo | undefined {
-  return videoModels.find((model) => model.id === id);
+export function findGenerationModel(id: string | null | undefined): GenerationModelInfo | undefined {
+  return generationModels.find((model) => model.id === id);
 }
 
-/** Модель, которой можно выполнить запрос с такими параметрами. */
-export function modelForTiming(timingMode: TimingMode): VideoModelId {
-  return timingMode === 'FRAMES' ? 'seedance-1-0-pro' : defaultVideoModelId;
+/** Ролик или картинка — определяется выбранной моделью, а не режимом. */
+export function kindForMode(mode: GenerationMode): GenerationKind {
+  return mode === 'TEXT_TO_IMAGE' || mode === 'IMAGE_TO_IMAGE' ? 'IMAGE' : 'VIDEO';
+}
+
+export function modeIsImageInput(mode: GenerationMode): boolean {
+  return mode === 'IMAGE_TO_VIDEO' || mode === 'IMAGE_TO_IMAGE';
+}
+
+/** Модель по умолчанию для режима — используется, когда клиент её не прислал. */
+export function defaultModelForMode(mode: GenerationMode): GenerationModelId {
+  return kindForMode(mode) === 'IMAGE' ? defaultImageModelId : defaultVideoModelId;
 }
 
 export const generationInputSchema = z
   .object({
     mode: z.enum(generationModes),
-    modelId: z.enum(videoModelIds).default(defaultVideoModelId),
+    modelId: z.enum(generationModelIds).default(defaultVideoModelId),
     prompt: z.string().trim().min(3).max(2000),
     enhancedPrompt: z.string().trim().max(3000).optional(),
     firstFrameAssetId: z.string().min(1).optional(),
     lastFrameAssetId: z.string().min(1).optional(),
     aspectRatio: z.enum(aspectRatios),
     timingMode: z.enum(timingModes).default('DURATION'),
-    duration: z.coerce.number().int().min(4).max(12).default(5),
+    duration: z.coerce.number().int().min(3).max(15).default(5),
     frames: z.coerce.number().int().min(29).max(289).optional(),
     resolution: z.enum(resolutions),
     buildQuantity: z.coerce.number().int().min(1).max(8).default(1),
@@ -109,11 +238,11 @@ export const generationInputSchema = z
     forceFailure: z.boolean().optional().default(false),
   })
   .superRefine((value, context) => {
-    if (value.mode === 'IMAGE_TO_VIDEO' && !value.firstFrameAssetId) {
+    if (modeIsImageInput(value.mode) && !value.firstFrameAssetId) {
       context.addIssue({
         code: 'custom',
         path: ['firstFrameAssetId'],
-        message: 'First frame is required for image-to-video',
+        message: 'A source image is required for this mode',
       });
     }
     if (value.lastFrameAssetId && !value.firstFrameAssetId) {
@@ -133,8 +262,15 @@ export const generationInputSchema = z
       }
     }
     // Возможности проверяем по выбранной модели, а не по режиму длины.
-    const model = findVideoModel(value.modelId);
+    const model = findGenerationModel(value.modelId);
     if (!model) return;
+    if (!model.endpoints[value.mode]) {
+      context.addIssue({
+        code: 'custom',
+        path: ['mode'],
+        message: `${model.label} does not support this mode`,
+      });
+    }
     if (value.timingMode === 'FRAMES' && !model.supportsFrames) {
       context.addIssue({
         code: 'custom',
@@ -147,6 +283,38 @@ export const generationInputSchema = z
         code: 'custom',
         path: ['generateAudio'],
         message: `${model.label} does not generate audio`,
+      });
+    }
+    if (!model.aspectRatios.includes(value.aspectRatio)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['aspectRatio'],
+        message: `${model.label} does not support ${value.aspectRatio}`,
+      });
+    }
+    if (!model.resolutions.includes(value.resolution)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['resolution'],
+        message: `${model.label} does not support ${value.resolution}`,
+      });
+    }
+    if (
+      model.kind === 'VIDEO' &&
+      value.timingMode === 'DURATION' &&
+      !model.durations.includes(value.duration)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['duration'],
+        message: `${model.label} does not support ${value.duration}s`,
+      });
+    }
+    if (model.kind === 'IMAGE' && value.lastFrameAssetId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['lastFrameAssetId'],
+        message: `${model.label} does not use a last frame`,
       });
     }
   });
@@ -172,12 +340,30 @@ export const loginSchema = z.object({
 
 
 export const PRICE_CONFIG = {
-  version: 2,
+  version: 3,
   basePerSecond: 1.6,
-  resolutionMultiplier: { '480p': 0.75, '720p': 1, '1080p': 2.2 },
+  resolutionMultiplier: { '480p': 0.75, '720p': 1, '1080p': 2.2, '4k': 4 },
   audioMultiplier: 2,
-  modeSurcharge: { TEXT_TO_VIDEO: 0, IMAGE_TO_VIDEO: 2 },
+  modeSurcharge: {
+    TEXT_TO_VIDEO: 0,
+    IMAGE_TO_VIDEO: 2,
+    TEXT_TO_IMAGE: 0,
+    IMAGE_TO_IMAGE: 1,
+  },
+  /** У картинки нет секунд, поэтому её база — цена за один кадр. */
+  imageBase: 4,
 } as const;
+
+/**
+ * Параметры, от которых зависит цена. `modelId` необязателен: без него цена
+ * считается по базовой ставке, и старые записи в базе остаются считаемыми.
+ */
+export type GenerationCostInput = Pick<
+  GenerationInput,
+  'timingMode' | 'duration' | 'frames' | 'resolution' | 'mode' | 'generateAudio'
+> & { modelId?: string | null };
+
+export type GenerationBatchCostInput = GenerationCostInput & Pick<GenerationInput, 'buildQuantity'>;
 
 export function generationDurationSeconds(
   input: Pick<GenerationInput, 'timingMode' | 'duration' | 'frames'>,
@@ -185,37 +371,33 @@ export function generationDurationSeconds(
   return input.timingMode === 'FRAMES' && input.frames ? input.frames / 24 : input.duration;
 }
 
-export function calculateSingleGenerationCost(
-  input: Pick<
-    GenerationInput,
-    'timingMode' | 'duration' | 'frames' | 'resolution' | 'mode' | 'generateAudio'
-  >,
-): number {
+function priceMultiplierFor(modelId: string | null | undefined): number {
+  return findGenerationModel(modelId)?.priceMultiplier ?? 1;
+}
+
+export function calculateSingleGenerationCost(input: GenerationCostInput): number {
+  const multiplier =
+    PRICE_CONFIG.resolutionMultiplier[input.resolution] * priceMultiplierFor(input.modelId);
+  if (kindForMode(input.mode) === 'IMAGE') {
+    return Math.max(
+      1,
+      Math.ceil(PRICE_CONFIG.imageBase * multiplier + PRICE_CONFIG.modeSurcharge[input.mode]),
+    );
+  }
   const seconds = generationDurationSeconds(input);
-  const resolutionCost =
-    seconds * PRICE_CONFIG.basePerSecond * PRICE_CONFIG.resolutionMultiplier[input.resolution];
+  const resolutionCost = seconds * PRICE_CONFIG.basePerSecond * multiplier;
   const audioCost = input.generateAudio ? resolutionCost * PRICE_CONFIG.audioMultiplier : resolutionCost;
   return Math.max(1, Math.ceil(audioCost + PRICE_CONFIG.modeSurcharge[input.mode]));
 }
 
-export function calculateGenerationCost(
-  input: Pick<
-    GenerationInput,
-    | 'timingMode'
-    | 'duration'
-    | 'frames'
-    | 'resolution'
-    | 'mode'
-    | 'generateAudio'
-    | 'buildQuantity'
-  >,
-): number {
+export function calculateGenerationCost(input: GenerationBatchCostInput): number {
   return calculateSingleGenerationCost(input) * input.buildQuantity;
 }
 
 export interface CostBreakdown {
+  kind: GenerationKind;
   seconds: number;
-  /** Стоимость одного ролика без звука и без надбавки за режим. */
+  /** Стоимость одного результата без звука и без надбавки за режим. */
   baseCost: number;
   /** Сколько кредитов добавляет включённый звук. */
   audioCost: number;
@@ -228,25 +410,21 @@ export interface CostBreakdown {
 }
 
 /** Разбивка цены, которую можно показать пользователю до нажатия Generate. */
-export function describeGenerationCost(
-  input: Pick<
-    GenerationInput,
-    | 'timingMode'
-    | 'duration'
-    | 'frames'
-    | 'resolution'
-    | 'mode'
-    | 'generateAudio'
-    | 'buildQuantity'
-  >,
-): CostBreakdown {
-  const seconds = generationDurationSeconds(input);
-  const resolutionMultiplier = PRICE_CONFIG.resolutionMultiplier[input.resolution];
-  const baseCost = seconds * PRICE_CONFIG.basePerSecond * resolutionMultiplier;
-  const audioCost = input.generateAudio ? baseCost * (PRICE_CONFIG.audioMultiplier - 1) : 0;
+export function describeGenerationCost(input: GenerationBatchCostInput): CostBreakdown {
+  const kind = kindForMode(input.mode);
+  const seconds = kind === 'IMAGE' ? 0 : generationDurationSeconds(input);
+  const resolutionMultiplier =
+    PRICE_CONFIG.resolutionMultiplier[input.resolution] * priceMultiplierFor(input.modelId);
+  const baseCost =
+    kind === 'IMAGE'
+      ? PRICE_CONFIG.imageBase * resolutionMultiplier
+      : seconds * PRICE_CONFIG.basePerSecond * resolutionMultiplier;
+  const audioCost =
+    kind === 'VIDEO' && input.generateAudio ? baseCost * (PRICE_CONFIG.audioMultiplier - 1) : 0;
   const modeCost = PRICE_CONFIG.modeSurcharge[input.mode];
   const perVideo = calculateSingleGenerationCost(input);
   return {
+    kind,
     seconds,
     baseCost: Math.round(baseCost),
     audioCost: Math.round(audioCost),
@@ -278,6 +456,8 @@ export type Visibility = (typeof visibilityValues)[number];
 export interface VideoDto {
   id: string;
   generationId: string;
+  /** VIDEO — ролик, IMAGE — картинка. У картинки `videoUrl` ведёт на сам файл. */
+  mediaType: GenerationKind;
   videoUrl: string;
   thumbnailUrl: string;
   duration: number;
@@ -306,6 +486,7 @@ export interface FeedItemDto extends PublicationSettingsDto {
   user: { id: string; displayName: string; avatarUrl?: string | null };
   video: {
     id: string;
+    mediaType: GenerationKind;
     videoUrl: string;
     thumbnailUrl: string;
     duration: number;

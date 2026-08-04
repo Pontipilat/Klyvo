@@ -134,6 +134,8 @@ model Video {
   id           String            @id @default(cuid())
   generationId String            @unique
   userId       String
+  /** VIDEO — ролик, IMAGE — картинка. У картинки videoUrl ведёт на сам файл. */
+  mediaType    String            @default("VIDEO")
   videoUrl     String
   thumbnailUrl String
   videoStorageKey String?

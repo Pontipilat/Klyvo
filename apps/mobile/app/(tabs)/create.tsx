@@ -21,21 +21,24 @@ import {
 } from 'lucide-react-native';
 import {
   describeGenerationCost,
-  type AspectRatio,
+  modeIsImageInput,
+  type GenerationMode,
+  type GenerationModelInfo,
   type Resolution,
   type TimingMode,
-  type VideoModelInfo,
   type WalletDto,
 } from '@klyvo/shared';
 
-interface ModelInfo extends VideoModelInfo {
+interface ModelInfo extends GenerationModelInfo {
   connected: boolean;
   available: boolean;
+  modes: GenerationMode[];
 }
 interface ModelsResponse {
   defaultModelId: string;
   models: ModelInfo[];
 }
+
 import { apiRequest } from '../../src/api/client';
 import {
   KlyvoBottomSheet,
@@ -54,6 +57,28 @@ import { useCreateStore, type ReferenceAsset } from '../../src/state/create';
 import { colors, fonts, radii, spacing } from '../../src/theme';
 
 const MAX_FRAME_BYTES = 50 * 1024 * 1024;
+
+/**
+ * Режим под выбранную модель. Загруженный кадр — это осознанный выбор
+ * пользователя, поэтому при смене модели он сохраняется, если модель его умеет.
+ */
+function modeForModel(model: ModelInfo, wantsSourceImage: boolean): GenerationMode {
+  const modes = model.modes;
+  const withImage = modes.find((mode) => modeIsImageInput(mode));
+  const withoutImage = modes.find((mode) => !modeIsImageInput(mode));
+  if (wantsSourceImage && withImage) return withImage;
+  // Модель без единого режима в реестр не попадает, но тип этого не знает.
+  return withoutImage ?? withImage ?? modes[0] ?? 'TEXT_TO_VIDEO';
+}
+
+/** Ближайшее допустимое значение из тех, что принимает модель. */
+function nearest(values: readonly number[], value: number) {
+  if (values.includes(value)) return value;
+  return values.reduce(
+    (best, item) => (Math.abs(item - value) < Math.abs(best - value) ? item : best),
+    values[0] ?? value,
+  );
+}
 
 function OptionGroup<T extends string | number>({
   title,
@@ -158,6 +183,7 @@ export default function CreateScreen() {
   });
   const cost = describeGenerationCost({
     mode: state.mode,
+    modelId: state.modelId,
     timingMode: state.timingMode,
     duration: state.duration,
     frames: state.frames,
@@ -181,6 +207,18 @@ export default function CreateScreen() {
   });
   const activeModel =
     models.data?.models.find((model) => model.id === state.modelId) ?? models.data?.models[0];
+  // Картинка — это другой набор настроек: длительности, звука и камеры у неё нет.
+  const isImage = activeModel?.kind === 'IMAGE';
+  const aspectOptions = activeModel?.aspectRatios ?? ['9:16'];
+  const resolutionOptions = activeModel?.resolutions ?? ['720p'];
+  const durationOptions = activeModel?.durations ?? [5];
+  const framesSupported = (models.data?.models ?? []).some((model) => model.supportsFrames);
+  /** Качество у картинки — это уровень детализации у модели, а не разрешение видео. */
+  const imageQualityLabels: Record<string, string> = {
+    '480p': t('imageQualityLow'),
+    '720p': t('imageQualityMedium'),
+    '1080p': t('imageQualityHigh'),
+  };
 
   const generate = useMutation({
     mutationFn: () =>
@@ -249,7 +287,7 @@ export default function CreateScreen() {
         uri: selected.uri,
         mimeType: response.asset.mimeType,
       });
-      state.set('mode', 'IMAGE_TO_VIDEO');
+      if (activeModel) state.set('mode', modeForModel(activeModel, true));
     } catch (error) {
       toast.show(tError(error), 'error');
     } finally {
@@ -258,13 +296,28 @@ export default function CreateScreen() {
   };
 
   /**
-   * Смена модели подстраивает параметры под её возможности,
-   * чтобы нельзя было отправить заведомо невалидный запрос.
+   * Смена модели подстраивает параметры под её возможности.
+   *
+   * Модели различаются сильнее, чем раньше: у Kling 3 всего три формата кадра и
+   * фиксированное качество, у GPT Image 2 нет ни длительности, ни звука. Поэтому
+   * несовместимые значения не «остаются висеть», а сразу заменяются ближайшими
+   * допустимыми — иначе запрос ушёл бы на сервер и вернулся ошибкой валидации.
    */
   const selectModel = (model: ModelInfo) => {
     state.set('modelId', model.id);
+    state.set('mode', modeForModel(model, Boolean(state.firstFrame)));
     if (!model.supportsAudio) state.set('generateAudio', false);
     if (!model.supportsFrames && state.timingMode === 'FRAMES') state.set('timingMode', 'DURATION');
+    if (!model.supportsLastFrame) state.set('lastFrame', undefined);
+    const aspectRatio = model.aspectRatios[0];
+    if (aspectRatio && !model.aspectRatios.includes(state.aspectRatio)) {
+      state.set('aspectRatio', aspectRatio);
+    }
+    const resolution = model.resolutions[0];
+    if (resolution && !model.resolutions.includes(state.resolution)) {
+      state.set('resolution', resolution);
+    }
+    if (model.durations.length) state.set('duration', nearest(model.durations, state.duration));
     setModelOpen(false);
   };
 
@@ -285,7 +338,7 @@ export default function CreateScreen() {
   };
 
   const promptReady = state.prompt.trim().length >= 3;
-  const frameReady = state.mode === 'TEXT_TO_VIDEO' || Boolean(state.firstFrame);
+  const frameReady = !modeIsImageInput(state.mode) || Boolean(state.firstFrame);
   const enoughCredits = available >= cost.total;
   const canGenerate = promptReady && frameReady && enoughCredits;
   // Кнопка больше не «просто серая»: всегда видно, чего именно не хватает.
@@ -371,10 +424,17 @@ export default function CreateScreen() {
 
           <KlyvoSegmentedControl
             value={state.mode}
-            options={[
-              { value: 'TEXT_TO_VIDEO', label: t('modeText') },
-              { value: 'IMAGE_TO_VIDEO', label: t('modeImage') },
-            ]}
+            options={
+              isImage
+                ? [
+                    { value: 'TEXT_TO_IMAGE' as const, label: t('modeText') },
+                    { value: 'IMAGE_TO_IMAGE' as const, label: t('modeImage') },
+                  ]
+                : [
+                    { value: 'TEXT_TO_VIDEO' as const, label: t('modeText') },
+                    { value: 'IMAGE_TO_VIDEO' as const, label: t('modeImage') },
+                  ]
+            }
             onChange={(mode) => state.set('mode', mode)}
           />
 
@@ -401,10 +461,10 @@ export default function CreateScreen() {
             </View>
           </KlyvoCard>
 
-          {state.mode === 'IMAGE_TO_VIDEO' ? (
+          {modeIsImageInput(state.mode) ? (
             <View style={styles.framesRow}>
               <FramePicker
-                title={t('firstFrame')}
+                title={isImage ? t('sourceImage') : t('firstFrame')}
                 asset={state.firstFrame}
                 disabled={uploading}
                 t={t}
@@ -414,33 +474,36 @@ export default function CreateScreen() {
                   state.set('lastFrame', undefined);
                 }}
               />
-              <FramePicker
-                title={t('lastFrame')}
-                optional
-                disabled={!state.firstFrame || uploading}
-                asset={state.lastFrame}
-                t={t}
-                onPick={() => void pickFrame('lastFrame')}
-                onRemove={() => state.set('lastFrame', undefined)}
-              />
+              {activeModel?.supportsLastFrame ? (
+                <FramePicker
+                  title={t('lastFrame')}
+                  optional
+                  disabled={!state.firstFrame || uploading}
+                  asset={state.lastFrame}
+                  t={t}
+                  onPick={() => void pickFrame('lastFrame')}
+                  onRemove={() => state.set('lastFrame', undefined)}
+                />
+              ) : null}
             </View>
           ) : null}
 
           <OptionGroup
             title={t('format')}
             value={state.aspectRatio}
-            options={(['SMART', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'] as AspectRatio[]).map(
-              (value) => ({ value, label: value === 'SMART' ? 'Smart' : value }),
-            )}
+            options={aspectOptions.map((value) => ({
+              value,
+              label: value === 'SMART' ? 'Smart' : value,
+            }))}
             onChange={(value) => state.set('aspectRatio', value)}
           />
 
-          {state.timingMode === 'DURATION' ? (
+          {!isImage && state.timingMode === 'DURATION' ? (
             <OptionGroup
               title={t('duration')}
               hint={t('lengthSecondsHint')}
               value={state.duration}
-              options={[4, 5, 6, 7, 8, 9, 10, 11, 12].map((value) => ({
+              options={durationOptions.map((value) => ({
                 value,
                 label: `${value} ${t('seconds')}`,
               }))}
@@ -451,27 +514,31 @@ export default function CreateScreen() {
           <OptionGroup
             title={t('quality')}
             value={state.resolution}
-            options={(['480p', '720p', '1080p'] as Resolution[]).map((value) => ({
+            options={resolutionOptions.map((value: Resolution) => ({
               value,
-              label: value,
+              label: isImage ? (imageQualityLabels[value] ?? value) : value,
             }))}
             onChange={(value) => state.set('resolution', value)}
           />
 
-          <OptionGroup
-            title={t('sound')}
-            hint={state.timingMode === 'FRAMES' ? t('soundUnavailable') : `×2 ${t('cost').toLowerCase()}`}
-            value={state.generateAudio ? 'OPEN' : 'CLOSE'}
-            options={[
-              {
-                value: 'OPEN',
-                label: t('soundOn'),
-                disabled: state.timingMode === 'FRAMES',
-              },
-              { value: 'CLOSE', label: t('soundOff') },
-            ]}
-            onChange={(value) => state.set('generateAudio', value === 'OPEN')}
-          />
+          {!isImage && activeModel?.supportsAudio !== false ? (
+            <OptionGroup
+              title={t('sound')}
+              hint={
+                state.timingMode === 'FRAMES' ? t('soundUnavailable') : `×2 ${t('cost').toLowerCase()}`
+              }
+              value={state.generateAudio ? 'OPEN' : 'CLOSE'}
+              options={[
+                {
+                  value: 'OPEN',
+                  label: t('soundOn'),
+                  disabled: state.timingMode === 'FRAMES',
+                },
+                { value: 'CLOSE', label: t('soundOff') },
+              ]}
+              onChange={(value) => state.set('generateAudio', value === 'OPEN')}
+            />
+          ) : null}
 
           <Pressable
             onPress={() => setAdvancedOpen(!advancedOpen)}
@@ -489,18 +556,21 @@ export default function CreateScreen() {
 
           {advancedOpen ? (
             <>
-              <OptionGroup
-                title={t('lengthControl')}
-                hint={
-                  state.timingMode === 'FRAMES' ? t('lengthFramesHint') : t('lengthSecondsHint')
-                }
-                value={state.timingMode}
-                options={[
-                  { value: 'DURATION', label: t('lengthSeconds') },
-                  { value: 'FRAMES', label: t('lengthFrames') },
-                ]}
-                onChange={setTimingMode}
-              />
+              {/* Точное число кадров сейчас не умеет ни одна подключённая модель. */}
+              {framesSupported && !isImage ? (
+                <OptionGroup
+                  title={t('lengthControl')}
+                  hint={
+                    state.timingMode === 'FRAMES' ? t('lengthFramesHint') : t('lengthSecondsHint')
+                  }
+                  value={state.timingMode}
+                  options={[
+                    { value: 'DURATION', label: t('lengthSeconds') },
+                    { value: 'FRAMES', label: t('lengthFrames') },
+                  ]}
+                  onChange={setTimingMode}
+                />
+              ) : null}
 
               {state.timingMode === 'FRAMES' ? (
                 <KlyvoCard style={styles.framesControl}>
@@ -565,12 +635,14 @@ export default function CreateScreen() {
                 onChange={(value) => state.set('style', value)}
               />
 
-              <OptionGroup
-                title={t('camera')}
-                value={state.cameraMotion}
-                options={cameraOptions.map(([value, label]) => ({ value, label }))}
-                onChange={(value) => state.set('cameraMotion', value)}
-              />
+              {!isImage ? (
+                <OptionGroup
+                  title={t('camera')}
+                  value={state.cameraMotion}
+                  options={cameraOptions.map(([value, label]) => ({ value, label }))}
+                  onChange={(value) => state.set('cameraMotion', value)}
+                />
+              ) : null}
             </>
           ) : null}
         </ScrollView>
@@ -587,9 +659,11 @@ export default function CreateScreen() {
               <Info color={colors.textMuted} size={14} />
             </View>
             <Text style={styles.hint}>
-              {cost.quantity === 1
-                ? `${cost.seconds.toFixed(cost.seconds % 1 ? 1 : 0)} ${t('seconds')} · ${state.resolution}`
-                : `${cost.quantity} × ${cost.perVideo} ${t('creditsShort')}`}
+              {cost.quantity > 1
+                ? `${cost.quantity} × ${cost.perVideo} ${t('creditsShort')}`
+                : isImage
+                  ? `${t('imageResult')} · ${imageQualityLabels[state.resolution] ?? state.resolution}`
+                  : `${cost.seconds.toFixed(cost.seconds % 1 ? 1 : 0)} ${t('seconds')} · ${state.resolution}`}
             </Text>
           </Pressable>
           {enoughCredits ? (
@@ -615,7 +689,11 @@ export default function CreateScreen() {
       <KlyvoBottomSheet visible={costOpen} title={t('cost')} onClose={() => setCostOpen(false)}>
         <View style={styles.breakdown}>
           <CostRow
-            label={`${t('costBase')} · ${cost.seconds.toFixed(cost.seconds % 1 ? 2 : 0)} ${t('seconds')} · ${state.resolution}`}
+            label={
+              isImage
+                ? `${t('costBase')} · ${imageQualityLabels[state.resolution] ?? state.resolution}`
+                : `${t('costBase')} · ${cost.seconds.toFixed(cost.seconds % 1 ? 2 : 0)} ${t('seconds')} · ${state.resolution}`
+            }
             value={`${cost.baseCost}`}
           />
           {cost.audioCost ? (
@@ -655,8 +733,14 @@ export default function CreateScreen() {
                 </View>
                 <Text style={styles.hint}>{model.description}</Text>
                 <View style={styles.wrap}>
+                  <KlyvoChip label={model.kind === 'IMAGE' ? t('kindImage') : t('kindVideo')} />
                   <KlyvoChip label={model.connected ? t('modelConnected') : t('modelMock')} />
-                  {!model.supportsAudio ? <KlyvoChip label={t('modelAudioNo')} /> : null}
+                  {model.kind === 'VIDEO' ? (
+                    <KlyvoChip label={model.resolutions.join(' · ')} />
+                  ) : null}
+                  {!model.supportsAudio && model.kind === 'VIDEO' ? (
+                    <KlyvoChip label={t('modelAudioNo')} />
+                  ) : null}
                   {model.supportsFrames ? <KlyvoChip label={t('modelFramesYes')} /> : null}
                 </View>
               </Pressable>

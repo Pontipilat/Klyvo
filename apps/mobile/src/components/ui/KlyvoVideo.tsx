@@ -178,7 +178,8 @@ function FeedTile({
         resizeMode="cover"
         style={StyleSheet.absoluteFill}
       />
-      {active && !failed ? (
+      {/* У картинки видеофайла нет — в плитке остаётся только сама картинка. */}
+      {active && !failed && item.videoUrl ? (
         <TileVideo uri={item.videoUrl} muted={muted} onError={() => setFailed(true)} />
       ) : null}
       {/*

@@ -1,7 +1,32 @@
 {
   "permissions": {
     "allow": [
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "WebFetch(domain:fal.ai)",
+      "WebSearch",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:docs.fal.ai)",
+      "mcp__railway__list_variables",
+      "Bash(pnpm --filter @klyvo/shared exec tsc -p tsconfig.build.json --noEmit)",
+      "Bash(python -)",
+      "Bash(pnpm --filter @klyvo/shared build)",
+      "Bash(pnpm --filter @klyvo/api exec tsc -p tsconfig.build.json --noEmit)",
+      "Bash(pnpm --filter @klyvo/api exec prisma generate)",
+      "Bash(pnpm --filter @klyvo/api exec tsc --noEmit)",
+      "Bash(pnpm --filter @klyvo/api test)",
+      "Bash(node --require=./scripts/node-os-shim.cjs ../../node_modules/.pnpm/tsx@*/node_modules/tsx/dist/cli.mjs scripts/prepare-test-db.ts)",
+      "Bash(pnpm --filter @klyvo/api exec tsx scripts/prepare-test-db.ts)",
+      "Bash(DATABASE_URL=file:./test.db pnpm --filter @klyvo/api exec prisma db push --skip-generate)",
+      "Bash(NODE_OPTIONS=--require=./scripts/node-os-shim.cjs DATABASE_URL=file:./test.db PROVIDER_MODE=mock STORAGE_MODE=local MOCK_GENERATION_SECONDS=0 npx vitest run --sequence.concurrent=false)",
+      "Bash(npx tsc *)",
+      "Bash(pnpm --filter @klyvo/shared test)",
+      "Bash(npm run *)",
+      "Bash(NODE_OPTIONS=--require=./scripts/node-os-shim.cjs DATABASE_URL=file:./test.db PROVIDER_MODE=mock STORAGE_MODE=local MOCK_GENERATION_SECONDS=0 NODE_ENV=test npx tsx scripts/tmp-smoke.ts)",
+      "Bash(NODE_OPTIONS=--require=./scripts/node-os-shim.cjs DATABASE_URL=file:./test.db PROVIDER_MODE=mock STORAGE_MODE=local MOCK_GENERATION_SECONDS=0 npx tsx scripts/tmp-smoke.ts)",
+      "Bash(npx tsx *)",
+      "Bash(DATABASE_URL=file:./test.db npx prisma db push --skip-generate)",
+      "Bash(pnpm --filter @klyvo/api build)",
+      "Bash(npx eslint *)"
     ]
   }
 }

@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import {
   calculateSingleGenerationCost,
-  modelForTiming,
+  defaultModelForMode,
+  findGenerationModel,
   type GenerationInput,
+  type GenerationMode,
 } from '@klyvo/shared';
 import type { Generation } from '@prisma/client';
 import { config } from '../config.js';
@@ -11,14 +13,15 @@ import { AppError } from '../lib/errors.js';
 import { detectLanguage } from '../lib/language.js';
 import { prisma } from '../lib/prisma.js';
 import { createPreview, previewKey } from '../lib/images.js';
-import { createVideoPreview, feedPreviewKey } from '../lib/video-preview.js';
+import { createVideoPreview, extractPosterFrame, feedPreviewKey } from '../lib/video-preview.js';
 import {
+  liveProviders,
+  mediaGenerationProvider,
   moderationProvider,
   promptEnhancementProvider,
   storageProvider,
-  videoGenerationProvider,
 } from '../providers/index.js';
-import type { CompletedVideo, VideoGenerationInput } from '../providers/contracts.js';
+import type { CompletedMedia, MediaGenerationInput } from '../providers/contracts.js';
 import { ProviderRequestError } from '../providers/production.js';
 
 const terminalStatuses = new Set(['COMPLETED', 'FAILED', 'CANCELED']);
@@ -48,9 +51,9 @@ function scheduleGeneration(id: string) {
   });
 }
 
-/** Реестровый идентификатор модели → конкретное имя модели у провайдера. */
-function providerModelName(modelId: string) {
-  return modelId === 'seedance-1-0-pro' ? config.SEEDANCE_FRAMES_MODEL : config.SEEDANCE_MODEL;
+/** Реестровый идентификатор модели → адрес модели у fal.ai для этого режима. */
+function providerModelName(modelId: string, mode: GenerationMode) {
+  return findGenerationModel(modelId)?.endpoints[mode] ?? modelId;
 }
 
 /**
@@ -102,7 +105,7 @@ export async function createGenerations(userId: string, input: GenerationInput) 
   const singleCost = calculateSingleGenerationCost(input);
   const totalCost = singleCost * input.buildQuantity;
   const batchId = randomUUID();
-  const model = providerModelName(input.modelId);
+  const model = providerModelName(input.modelId, input.mode);
   const generations = await prisma.$transaction(async (tx) => {
     const wallet = await tx.creditWallet.findUnique({ where: { userId } });
     if (!wallet || wallet.balance - wallet.reservedBalance < totalCost) {
@@ -134,7 +137,7 @@ export async function createGenerations(userId: string, input: GenerationInput) 
           cameraMotion: input.cameraMotion,
           creditCost: singleCost,
           reservedCredits: singleCost,
-          provider: videoGenerationProvider.name,
+          provider: mediaGenerationProvider.name,
           modelId: input.modelId,
           model,
           forceFailure: input.forceFailure,
@@ -172,13 +175,13 @@ async function dispatchGeneration(id: string) {
       const generation = await prisma.generation.findUnique({ where: { id } });
       if (!generation || terminalStatuses.has(generation.status) || generation.providerTaskId) return;
       const enhancedPrompt = await englishPromptFor(generation);
-      const providerInput: VideoGenerationInput = {
+      const providerInput: MediaGenerationInput = {
         ...toGenerationInput(generation),
         enhancedPrompt,
         firstFrameUrl: await assetInputUrl(generation.firstFrameAssetId, generation.userId),
         lastFrameUrl: await assetInputUrl(generation.lastFrameAssetId, generation.userId),
       };
-      const providerTask = await videoGenerationProvider.create(providerInput);
+      const providerTask = await mediaGenerationProvider.create(providerInput);
       await prisma.generation.update({
         where: { id },
         data: {
@@ -212,43 +215,76 @@ async function storeRemote(url: string, fileName: string, fallbackMime: string) 
   );
 }
 
-async function persistCompletedMedia(id: string, result: CompletedVideo) {
-  const [video, thumbnail] = await Promise.all([
-    storeRemote(result.videoUrl, `${id}.mp4`, 'video/mp4'),
-    storeRemote(result.thumbnailUrl, `${id}.jpg`, 'image/jpeg'),
-  ]);
-  return { video, thumbnail };
+/**
+ * Складывает готовый файл к себе в хранилище.
+ *
+ * Ссылки fal.ai живут ограниченное время, поэтому и ролик, и картинка сразу
+ * копируются в наше хранилище — иначе однажды библиотека перестала бы открываться.
+ *
+ * Обложки fal не отдаёт: для ролика её вырезаем из первого кадра, для картинки
+ * обложка — сам файл, второй копии не нужно.
+ */
+async function persistCompletedMedia(id: string, result: CompletedMedia) {
+  if (result.mediaType === 'IMAGE') {
+    const image = await storeRemote(result.videoUrl, `${id}.jpg`, 'image/jpeg');
+    return { video: image, thumbnail: image };
+  }
+  const video = await storeRemote(result.videoUrl, `${id}.mp4`, 'video/mp4');
+  if (result.thumbnailUrl) {
+    return { video, thumbnail: await storeRemote(result.thumbnailUrl, `${id}.jpg`, 'image/jpeg') };
+  }
+  const poster = await posterFor(video.key, video.size);
+  // Без ffmpeg обложки не будет — ролик всё равно сохранён, плитка покажет первый кадр плеера.
+  return { video, thumbnail: poster ?? video };
 }
 
-const SHORT_SIDE: Record<string, number> = { '480p': 480, '720p': 720, '1080p': 1080 };
+async function posterFor(key: string, size: number) {
+  const putBuffer = storageProvider.putBuffer?.bind(storageProvider);
+  if (!putBuffer) return null;
+  const localPath = storageProvider.localPath?.(key);
+  const source = localPath
+    ? { path: localPath, size }
+    : { data: await streamToBuffer(await storageProvider.open(key)), size };
+  const frame = await extractPosterFrame(source);
+  if (!frame) return null;
+  return putBuffer(previewKey(key), frame, 'image/jpeg');
+}
+
+const SHORT_SIDE: Record<string, number> = {
+  '480p': 480,
+  '720p': 720,
+  '1080p': 1080,
+  '4k': 2160,
+};
 
 /**
- * ModelArk не всегда возвращает размеры кадра, и провайдер подставляет запасные 1280×720.
- * Из-за этого вертикальные ролики сохранялись как горизонтальные и такими же показывались
- * в ленте. Если формат был задан явно, размеры считаем из него — он точно известен.
+ * Провайдер не всегда возвращает размеры кадра, а от них зависит, как ролик ляжет
+ * в плитку ленты: без них вертикальное видео показывалось горизонтальным.
+ * Настоящие размеры, если они пришли, всегда важнее расчётных. Если их нет, но
+ * формат кадра был задан явно, размеры считаются из него — он точно известен.
  */
 function resolveDimensions(
   aspectRatio: string,
   resolution: string,
   provided: { width: number; height: number },
 ) {
+  if (provided.width > 0 && provided.height > 0) return provided;
   const match = /^(\d+):(\d+)$/u.exec(aspectRatio);
-  if (!match) return provided;
+  const shortSide = SHORT_SIDE[resolution] ?? 720;
+  if (!match) return { width: Math.round((shortSide * 16) / 9), height: shortSide };
   const ratioWidth = Number(match[1]);
   const ratioHeight = Number(match[2]);
-  if (!ratioWidth || !ratioHeight) return provided;
-  const shortSide = SHORT_SIDE[resolution] ?? 720;
+  if (!ratioWidth || !ratioHeight) return { width: shortSide, height: shortSide };
   const isPortrait = ratioHeight > ratioWidth;
   const width = isPortrait ? shortSide : Math.round((shortSide * ratioWidth) / ratioHeight);
   const height = isPortrait ? Math.round((shortSide * ratioHeight) / ratioWidth) : shortSide;
   return { width, height };
 }
 
-async function completeGeneration(id: string, result: CompletedVideo) {
+async function completeGeneration(id: string, result: CompletedMedia) {
   const generation = await prisma.generation.findUnique({ where: { id } });
   if (!generation || terminalStatuses.has(generation.status)) return generation;
-  const stored =
-    config.PROVIDER_MODE === 'seedance' ? await persistCompletedMedia(id, result) : null;
+  const stored = liveProviders ? await persistCompletedMedia(id, result) : null;
 
   return prisma.$transaction(async (tx) => {
     const current = await tx.generation.findUnique({ where: { id } });
@@ -276,14 +312,19 @@ async function completeGeneration(id: string, result: CompletedVideo) {
       data: {
         generationId: current.id,
         userId: current.userId,
+        mediaType: result.mediaType,
         videoUrl: result.videoUrl,
-        thumbnailUrl: result.thumbnailUrl,
+        // Обложки у ролика может не быть — тогда ссылкой служит сам файл.
+        thumbnailUrl: result.thumbnailUrl || result.videoUrl,
         videoStorageKey: stored?.video.key,
         thumbnailStorageKey: stored?.thumbnail.key,
+        // У картинки длительности нет, и выдумывать её нельзя: на ней держится цена и подписи.
         duration:
-          current.timingMode === 'FRAMES' && current.frames
-            ? current.frames / 24
-            : current.duration,
+          result.mediaType === 'IMAGE'
+            ? 0
+            : current.timingMode === 'FRAMES' && current.frames
+              ? current.frames / 24
+              : current.duration,
         ...resolveDimensions(current.aspectRatio, current.resolution, {
           width: result.width,
           height: result.height,
@@ -341,7 +382,7 @@ export async function cancelGeneration(id: string, userId: string) {
   const generation = await prisma.generation.findFirst({ where: { id, userId } });
   if (!generation) throw new AppError(404, 'GENERATION_NOT_FOUND', 'Generation was not found');
   if (terminalStatuses.has(generation.status)) return generation;
-  if (generation.providerTaskId) await videoGenerationProvider.cancel(generation.providerTaskId);
+  if (generation.providerTaskId) await mediaGenerationProvider.cancel(generation.providerTaskId);
   const result = await failGeneration(id, 'CANCELED_BY_USER');
   if (!result) return result;
   return prisma.generation.update({
@@ -374,9 +415,9 @@ export async function syncGeneration(id: string, depth = 0): Promise<
     return syncGeneration(id, depth + 1);
   }
 
-  if (config.PROVIDER_MODE === 'seedance') {
+  if (liveProviders) {
     try {
-      const result = await videoGenerationProvider.result(generation.providerTaskId);
+      const result = await mediaGenerationProvider.result(generation.providerTaskId);
       return result ? completeGeneration(id, result) : generation;
     } catch (error) {
       if (error instanceof ProviderRequestError && error.terminal) {
@@ -390,7 +431,7 @@ export async function syncGeneration(id: string, depth = 0): Promise<
   const total = config.MOCK_GENERATION_SECONDS * 1000;
   if (elapsed >= total) {
     if (generation.forceFailure) return failGeneration(id);
-    const result = await videoGenerationProvider.result(generation.providerTaskId);
+    const result = await mediaGenerationProvider.result(generation.providerTaskId);
     return result ? completeGeneration(id, result) : generation;
   }
   return generation;
@@ -447,7 +488,7 @@ export async function buildMissingFeedPreviews(
   if (!video?.videoStorageKey) return null;
   const data: { previewStorageKey?: string; thumbnailPreviewStorageKey?: string } = {};
 
-  if (!video.previewStorageKey) {
+  if (!video.previewStorageKey && video.mediaType !== 'IMAGE') {
     const key = video.videoStorageKey;
     const size = await storageProvider.size(key).catch(() => 0);
     if (size) {
@@ -503,6 +544,16 @@ export async function buildMissingFeedPreviews(
         );
       }
     }
+  }
+
+  /**
+   * У картинки облегчённой видеокопии нет и быть не может. Поле всё равно нужно
+   * заполнить: пока оно пустое, воркер выбирает эту же запись на каждом проходе
+   * и крутится по кругу. В ленту вместо копии уходит уменьшённый файл.
+   */
+  if (video.mediaType === 'IMAGE' && !video.previewStorageKey) {
+    data.previewStorageKey =
+      data.thumbnailPreviewStorageKey ?? video.thumbnailPreviewStorageKey ?? video.videoStorageKey;
   }
 
   if (!Object.keys(data).length) return null;
@@ -599,9 +650,9 @@ function providerErrorMessage(error: unknown) {
 export function toGenerationInput(source: Generation): GenerationInput {
   return {
     mode: source.mode as GenerationInput['mode'],
-    modelId: (source.modelId as GenerationInput['modelId']) ?? modelForTiming(
-      source.timingMode as GenerationInput['timingMode'],
-    ),
+    modelId:
+      (source.modelId as GenerationInput['modelId']) ??
+      defaultModelForMode(source.mode as GenerationMode),
     prompt: source.originalPrompt,
     enhancedPrompt: source.enhancedPrompt ?? undefined,
     firstFrameAssetId: source.firstFrameAssetId ?? undefined,
