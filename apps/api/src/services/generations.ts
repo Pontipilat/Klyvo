@@ -1,5 +1,10 @@
+import { createWriteStream } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import {
   calculateSingleGenerationCost,
   defaultModelForMode,
@@ -238,14 +243,33 @@ async function persistCompletedMedia(id: string, result: CompletedMedia) {
   return { video, thumbnail: poster ?? video };
 }
 
+/**
+ * Даёт ffmpeg путь к файлу на диске.
+ *
+ * У локального хранилища путь уже есть. У объектного (R2) файла на диске нет, и
+ * читать его целиком в память нельзя: ролик в 4K на пятнадцать секунд — это сотни
+ * мегабайт в оперативке на каждую готовую генерацию. Поэтому содержимое течёт
+ * потоком во временный файл, а после обработки временная папка удаляется.
+ */
+async function withLocalFile<T>(key: string, run: (path: string) => Promise<T>) {
+  const direct = storageProvider.localPath?.(key);
+  if (direct) return run(direct);
+  const directory = await mkdtemp(join(tmpdir(), 'klyvo-media-'));
+  try {
+    const path = join(directory, 'media');
+    await pipeline(await storageProvider.open(key), createWriteStream(path));
+    return await run(path);
+  } catch {
+    return null;
+  } finally {
+    await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 async function posterFor(key: string, size: number) {
   const putBuffer = storageProvider.putBuffer?.bind(storageProvider);
   if (!putBuffer) return null;
-  const localPath = storageProvider.localPath?.(key);
-  const source = localPath
-    ? { path: localPath, size }
-    : { data: await streamToBuffer(await storageProvider.open(key)), size };
-  const frame = await extractPosterFrame(source);
+  const frame = await withLocalFile(key, (path) => extractPosterFrame({ path, size }));
   if (!frame) return null;
   return putBuffer(previewKey(key), frame, 'image/jpeg');
 }
@@ -492,14 +516,8 @@ export async function buildMissingFeedPreviews(
     const key = video.videoStorageKey;
     const size = await storageProvider.size(key).catch(() => 0);
     if (size) {
-      const localPath = storageProvider.localPath?.(key);
-      const source = localPath
-        ? { path: localPath, size }
-        : { data: await streamToBuffer(await storageProvider.open(key)), size };
-      const preview = await createVideoPreview(
-        source,
-        { threads: config.FEED_PREVIEW_THREADS },
-        log,
+      const preview = await withLocalFile(key, (path) =>
+        createVideoPreview({ path, size }, { threads: config.FEED_PREVIEW_THREADS }, log),
       );
       if (preview) {
         const name = feedPreviewKey(key);
