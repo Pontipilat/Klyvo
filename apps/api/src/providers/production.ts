@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { basename, extname } from 'node:path';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, extname, join } from 'node:path';
 import type { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -148,18 +152,38 @@ export class S3StorageProvider implements StorageProvider {
     },
   });
 
+  /**
+   * Тело запроса сначала укладывается во временный файл, и только потом уходит в R2.
+   *
+   * Так приходится делать потому, что S3 требует Content-Length, а у входящего
+   * потока длина заранее неизвестна. Раньше размер считался подпиской на события
+   * потока — но подписка переводит его в режим чтения раньше, чем до него доберётся
+   * AWS SDK, и любая загрузка падала с «Unable to calculate hash for flowing
+   * readable stream». С файлом длина известна точно, при этом ни файл целиком в
+   * память не читается, ни по сети он по-прежнему едет потоком.
+   */
   async put(input: Readable, fileName: string, mimeType: string) {
     const extension = extname(basename(fileName)).slice(0, 12).toLowerCase();
     const now = new Date();
     const key = `uploads/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${randomUUID()}${extension}`;
-    let size = 0;
-    input.on('data', (chunk: Buffer | string) => {
-      size += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
-    });
-    await this.client.send(
-      new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: input, ContentType: mimeType }),
-    );
-    return { key, size };
+    const directory = await mkdtemp(join(tmpdir(), 'klyvo-upload-'));
+    const path = join(directory, 'body');
+    try {
+      await pipeline(input, createWriteStream(path));
+      const { size } = await stat(path);
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+          Body: createReadStream(path),
+          ContentType: mimeType,
+          ContentLength: size,
+        }),
+      );
+      return { key, size };
+    } finally {
+      await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 
   async putBuffer(key: string, data: Buffer, mimeType: string) {

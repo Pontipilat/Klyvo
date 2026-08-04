@@ -442,7 +442,9 @@ export async function syncGeneration(id: string, depth = 0): Promise<
   if (liveProviders) {
     try {
       const result = await mediaGenerationProvider.result(generation.providerTaskId);
-      return result ? completeGeneration(id, result) : generation;
+      // await обязателен: без него отказ внутри completeGeneration уходит мимо catch
+      // и всплывает наружу — список генераций отвечал 500 из-за одной сбойной записи.
+      return result ? await completeGeneration(id, result) : generation;
     } catch (error) {
       if (error instanceof ProviderRequestError && error.terminal) {
         return failGeneration(id, 'PROVIDER_TASK_FAILED', providerErrorMessage(error));

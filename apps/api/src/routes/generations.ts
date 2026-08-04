@@ -42,7 +42,12 @@ export const generationRoutes: FastifyPluginAsync = async (fastify) => {
     const nextCursor = found.length > query.limit ? found[query.limit]?.id : undefined;
     const items = await Promise.all(
       found.slice(0, query.limit).map(async (item) => {
-        if (['QUEUED', 'PROCESSING'].includes(item.status)) await syncGeneration(item.id);
+        // Сбой на одной генерации не должен прятать от пользователя всю библиотеку.
+        if (['QUEUED', 'PROCESSING'].includes(item.status)) {
+          await syncGeneration(item.id).catch((error: unknown) => {
+            request.log.error({ err: error, generationId: item.id }, 'Не удалось обновить генерацию');
+          });
+        }
         const current = await prisma.generation.findUnique({
           where: { id: item.id },
           include: { video: { include: { publication: true } } },
