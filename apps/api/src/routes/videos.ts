@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { visibilityValues } from '@klyvo/shared';
+import { generationKinds, visibilityValues } from '@klyvo/shared';
 import { authenticate } from '../lib/auth.js';
 import { AppError } from '../lib/errors.js';
 import { prisma } from '../lib/prisma.js';
@@ -139,6 +139,8 @@ export const videoRoutes: FastifyPluginAsync = async (fastify) => {
       .object({
         cursor: z.string().optional(),
         limit: z.coerce.number().int().min(1).max(20).default(8),
+        /** Ролики и картинки живут в разных лентах — смешивать их в одном списке незачем. */
+        kind: z.enum(generationKinds).optional(),
       })
       .parse(request.query);
     const items = await prisma.videoPublication.findMany({
@@ -147,9 +149,10 @@ export const videoRoutes: FastifyPluginAsync = async (fastify) => {
         video: {
           visibility: 'PUBLIC',
           deletedAt: null,
-          // В ленту попадают только ролики, файл которых лежит у нас. Ссылки провайдера
-          // живут ограниченное время, и без своей копии видео однажды перестаёт открываться.
+          // В ленту попадают только работы, файл которых лежит у нас. Ссылки провайдера
+          // живут ограниченное время, и без своей копии медиа однажды перестаёт открываться.
           videoStorageKey: { not: null },
+          ...(query.kind ? { mediaType: query.kind } : {}),
         },
       },
       include: {

@@ -22,7 +22,6 @@ import {
 import {
   describeGenerationCost,
   modeIsImageInput,
-  type GenerationKind,
   type GenerationMode,
   type GenerationModelInfo,
   type Resolution,
@@ -58,28 +57,6 @@ import { useCreateStore, type ReferenceAsset } from '../../src/state/create';
 import { colors, fonts, radii, spacing } from '../../src/theme';
 
 const MAX_FRAME_BYTES = 50 * 1024 * 1024;
-
-/**
- * Режим под выбранную модель. Загруженный кадр — это осознанный выбор
- * пользователя, поэтому при смене модели он сохраняется, если модель его умеет.
- */
-function modeForModel(model: ModelInfo, wantsSourceImage: boolean): GenerationMode {
-  const modes = model.modes;
-  const withImage = modes.find((mode) => modeIsImageInput(mode));
-  const withoutImage = modes.find((mode) => !modeIsImageInput(mode));
-  if (wantsSourceImage && withImage) return withImage;
-  // Модель без единого режима в реестр не попадает, но тип этого не знает.
-  return withoutImage ?? withImage ?? modes[0] ?? 'TEXT_TO_VIDEO';
-}
-
-/** Ближайшее допустимое значение из тех, что принимает модель. */
-function nearest(values: readonly number[], value: number) {
-  if (values.includes(value)) return value;
-  return values.reduce(
-    (best, item) => (Math.abs(item - value) < Math.abs(best - value) ? item : best),
-    values[0] ?? value,
-  );
-}
 
 function OptionGroup<T extends string | number>({
   title,
@@ -206,17 +183,17 @@ export default function CreateScreen() {
     queryKey: ['models'],
     queryFn: () => apiRequest<ModelsResponse>('/models'),
   });
-  const activeModel =
-    models.data?.models.find((model) => model.id === state.modelId) ?? models.data?.models[0];
-  // Картинка — это другой набор настроек: длительности, звука и камеры у неё нет.
-  const isImage = activeModel?.kind === 'IMAGE';
-  const kind: GenerationKind = isImage ? 'IMAGE' : 'VIDEO';
   /**
    * Выбор «видео или картинка» стоит выше выбора модели: модели для роликов и
    * для картинок не взаимозаменяемы, и показывать их одним списком — значит
-   * предлагать заведомо неподходящий вариант.
+   * предлагать заведомо неподходящий вариант. Тот же выбор читает лента.
    */
+  const kind = state.kind;
+  // Картинка — это другой набор настроек: длительности, звука и камеры у неё нет.
+  const isImage = kind === 'IMAGE';
   const modelsForKind = (models.data?.models ?? []).filter((model) => model.kind === kind);
+  const activeModel =
+    modelsForKind.find((model) => model.id === state.modelId) ?? modelsForKind[0];
   const aspectOptions = activeModel?.aspectRatios ?? ['9:16'];
   const resolutionOptions = activeModel?.resolutions ?? ['720p'];
   const durationOptions = activeModel?.durations ?? [5];
@@ -295,7 +272,8 @@ export default function CreateScreen() {
         uri: selected.uri,
         mimeType: response.asset.mimeType,
       });
-      if (activeModel) state.set('mode', modeForModel(activeModel, true));
+      // Загруженный кадр означает, что генерируем из него — режим переключается сам.
+      if (activeModel) state.applyModel(activeModel);
     } catch (error) {
       toast.show(tError(error), 'error');
     } finally {
@@ -303,37 +281,9 @@ export default function CreateScreen() {
     }
   };
 
-  /**
-   * Смена модели подстраивает параметры под её возможности.
-   *
-   * Модели различаются сильнее, чем раньше: у Kling 3 всего три формата кадра и
-   * фиксированное качество, у GPT Image 2 нет ни длительности, ни звука. Поэтому
-   * несовместимые значения не «остаются висеть», а сразу заменяются ближайшими
-   * допустимыми — иначе запрос ушёл бы на сервер и вернулся ошибкой валидации.
-   */
   const selectModel = (model: ModelInfo) => {
-    state.set('modelId', model.id);
-    state.set('mode', modeForModel(model, Boolean(state.firstFrame)));
-    if (!model.supportsAudio) state.set('generateAudio', false);
-    if (!model.supportsFrames && state.timingMode === 'FRAMES') state.set('timingMode', 'DURATION');
-    if (!model.supportsLastFrame) state.set('lastFrame', undefined);
-    const aspectRatio = model.aspectRatios[0];
-    if (aspectRatio && !model.aspectRatios.includes(state.aspectRatio)) {
-      state.set('aspectRatio', aspectRatio);
-    }
-    const resolution = model.resolutions[0];
-    if (resolution && !model.resolutions.includes(state.resolution)) {
-      state.set('resolution', resolution);
-    }
-    if (model.durations.length) state.set('duration', nearest(model.durations, state.duration));
+    state.applyModel(model);
     setModelOpen(false);
-  };
-
-  /** Переключение между роликами и картинками — это смена модели на подходящую. */
-  const selectKind = (next: GenerationKind) => {
-    if (next === kind) return;
-    const target = (models.data?.models ?? []).find((model) => model.kind === next);
-    if (target) selectModel(target);
   };
 
   const setTimingMode = (mode: TimingMode) => {
@@ -404,7 +354,7 @@ export default function CreateScreen() {
               { value: 'VIDEO' as const, label: t('kindVideoTab') },
               { value: 'IMAGE' as const, label: t('kindImageTab') },
             ]}
-            onChange={selectKind}
+            onChange={state.setKind}
           />
 
           {/* Пользователь всегда видит, какой моделью генерирует, и может её сменить. */}

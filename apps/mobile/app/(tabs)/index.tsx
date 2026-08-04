@@ -18,7 +18,12 @@ import {
   VolumeX,
   X,
 } from 'lucide-react-native';
-import { describeGenerationCost, type FeedItemDto, type WalletDto } from '@klyvo/shared';
+import {
+  describeGenerationCost,
+  modeIsImageInput,
+  type FeedItemDto,
+  type WalletDto,
+} from '@klyvo/shared';
 import { apiRequest } from '../../src/api/client';
 import {
   KlyvoBottomSheet,
@@ -67,7 +72,6 @@ export default function FeedScreen() {
   const createStore = useCreateStore();
   const [muted, setMuted] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [section, setSection] = useState<FeedSection>('video');
   const [refreshing, setRefreshing] = useState(false);
   /**
    * Вкладка остаётся смонтированной при переходе на другую, и плееры замирали
@@ -92,11 +96,21 @@ export default function FeedScreen() {
     queryFn: () => apiRequest<WalletDto>('/wallet'),
   });
 
+  /**
+   * Лента показывает то же, что выбрано на экране создания: ролики или картинки.
+   * Вид входит в ключ запроса, иначе при переключении отдавался бы старый кэш.
+   */
+  const kind = createStore.kind;
+  const section: FeedSection = kind === 'IMAGE' ? 'image' : 'video';
+  const feedKey = ['feed', kind] as const;
+
   const feed = useInfiniteQuery({
-    queryKey: ['feed'],
+    queryKey: feedKey,
     initialPageParam: '',
     queryFn: ({ pageParam }) =>
-      apiRequest<FeedPage>(`/feed?limit=12${pageParam ? `&cursor=${pageParam}` : ''}`),
+      apiRequest<FeedPage>(
+        `/feed?limit=12&kind=${kind}${pageParam ? `&cursor=${pageParam}` : ''}`,
+      ),
     getNextPageParam: (last) => last.nextCursor,
   });
 
@@ -125,9 +139,9 @@ export default function FeedScreen() {
         method: liked ? 'DELETE' : 'POST',
       }),
     onMutate: async ({ videoId, liked }) => {
-      await queryClient.cancelQueries({ queryKey: ['feed'] });
-      const previous = queryClient.getQueryData(['feed']);
-      queryClient.setQueryData<{ pages: FeedPage[]; pageParams: unknown[] }>(['feed'], (current) =>
+      await queryClient.cancelQueries({ queryKey: feedKey });
+      const previous = queryClient.getQueryData(feedKey);
+      queryClient.setQueryData<{ pages: FeedPage[]; pageParams: unknown[] }>(feedKey, (current) =>
         current
           ? {
               ...current,
@@ -149,7 +163,7 @@ export default function FeedScreen() {
       return { previous };
     },
     onError: (error, _variables, context) => {
-      if (context?.previous) queryClient.setQueryData(['feed'], context.previous);
+      if (context?.previous) queryClient.setQueryData(feedKey, context.previous);
       toast.show(tError(error), 'error');
     },
   });
@@ -300,18 +314,10 @@ export default function FeedScreen() {
 
   const headerHeight = insets.top + 52;
   const promptReady = composeText.trim().length >= 3;
-  const frameReady = createStore.mode === 'TEXT_TO_VIDEO' || Boolean(createStore.firstFrame);
+  const frameReady = !modeIsImageInput(createStore.mode) || Boolean(createStore.firstFrame);
   const enoughCredits = available >= cost.total;
 
   const body = () => {
-    // Лента изображений появится позже — раздел уже виден в меню, но пока пустой.
-    if (section === 'image') {
-      return (
-        <View style={[styles.center, { paddingTop: headerHeight }]}>
-          <KlyvoEmptyState title={t('imageFeedTitle')} body={t('imageFeedBody')} />
-        </View>
-      );
-    }
     if (feed.isError) {
       return (
         <View style={[styles.center, { paddingTop: headerHeight }]}>
@@ -429,7 +435,8 @@ export default function FeedScreen() {
         activeKey={section}
         onClose={() => setMenuOpen(false)}
         onSelect={(key: string) => {
-          setSection(key === 'image' ? 'image' : 'video');
+          // Раздел меню и есть выбор вида: он же применяется на экране создания.
+          createStore.setKind(key === 'image' ? 'IMAGE' : 'VIDEO');
           setMenuOpen(false);
         }}
         items={[
