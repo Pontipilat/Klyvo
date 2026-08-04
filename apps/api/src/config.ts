@@ -11,6 +11,12 @@ const envSchema = z.object({
   /** `fal` — настоящие генерации через fal.ai, `mock` — заглушки для разработки. */
   PROVIDER_MODE: z.enum(['mock', 'fal']).default('mock'),
   STORAGE_MODE: z.enum(['local', 's3']).default('local'),
+  /**
+   * Куда локальное хранилище кладёт файлы. Относительный путь считается от рабочего
+   * каталога API. На хостинге сюда указывают примонтированный диск — иначе загруженные
+   * и сгенерированные файлы исчезают вместе с контейнером при каждом деплое.
+   */
+  UPLOADS_DIR: z.string().min(1).default('uploads'),
   PAYMENT_MODE: z.enum(['mock', 'store']).default('mock'),
   MOCK_GENERATION_SECONDS: z.coerce.number().min(0).max(120).default(10),
   MAX_UPLOAD_MB: z.coerce.number().min(1).max(250).default(50),

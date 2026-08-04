@@ -28,6 +28,7 @@ export const promptEnhancementProvider: PromptEnhancementProvider =
 export const storageProvider: StorageProvider =
   config.STORAGE_MODE === 's3'
     ? new S3StorageProvider()
-    : new LocalStorageProvider(resolve(process.cwd(), 'uploads'));
+    // resolve оставляет абсолютный путь как есть, поэтому UPLOADS_DIR может указывать на диск.
+    : new LocalStorageProvider(resolve(process.cwd(), config.UPLOADS_DIR));
 export const paymentProvider = new MockPaymentProvider();
 export const moderationProvider = new MockModerationProvider();
