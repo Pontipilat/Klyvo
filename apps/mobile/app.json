@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "Klyvo",
+    "slug": "klyvo-ai-video-studio",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "klyvo",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "backgroundColor": "#09090B",
+    "icon": "./assets/brand/klyvo-ios-icon.png",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "studio.klyvo.app",
+      "icon": "./assets/brand/klyvo-ios-icon.png"
+    },
+    "android": {
+      "package": "studio.klyvo.app",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/brand/klyvo-android-icon.png",
+        "backgroundColor": "#09090B"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Klyvo uses selected images as the first or last frame of your video."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Klyvo needs access to show your media library.",
+          "savePhotosPermission": "Klyvo saves generated videos to your photo library.",
+          "granularPermissions": ["photo", "video"]
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#09090B",
+          "image": "./assets/brand/klyvo-splash.png",
+          "imageWidth": 260,
+          "resizeMode": "contain",
+          "dark": {
+            "image": "./assets/brand/klyvo-splash.png",
+            "backgroundColor": "#09090B"
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

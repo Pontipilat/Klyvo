@@ -1,0 +1,49 @@
+{
+  "name": "klyvo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Klyvo AI Video Studio monorepo",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n API,MOBILE -c green,cyan \"npm:api\" \"npm:mobile\"",
+    "mobile": "npm run start --workspace @klyvo/mobile",
+    "api": "npm run dev --workspace @klyvo/api",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "db:generate": "npm run db:generate --workspace @klyvo/api",
+    "db:migrate": "npm run db:migrate --workspace @klyvo/api",
+    "db:seed": "npm run db:seed --workspace @klyvo/api",
+    "db:remove-demo": "npm run db:remove-demo --workspace @klyvo/api",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "concurrently": "^9.2.1",
+    "eslint": "^9.39.1",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^16.5.0",
+    "prettier": "^3.7.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.50.1"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "pnpm": {
+    "//": "ffmpeg-static скачивает бинарник в postinstall — без этого разрешения он не появится",
+    "onlyBuiltDependencies": [
+      "ffmpeg-static",
+      "sharp",
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "esbuild"
+    ]
+  }
+}

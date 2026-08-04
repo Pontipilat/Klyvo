@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.expo/
+.env
+*.log
+coverage/
+apps/api/prisma/*.db
+apps/api/prisma/*.db-journal
+apps/api/uploads/*
+!apps/api/uploads/.gitkeep
+.DS_Store
