@@ -245,8 +245,10 @@ function GenerationCard({
           {item.originalPrompt}
         </Text>
         {isFailed ? (
-          <Text numberOfLines={2} style={styles.errorText}>
-            {item.status === 'CANCELED' ? t('canceled') : t('errProvider')}
+          <Text numberOfLines={3} style={styles.errorText}>
+            {item.status === 'CANCELED'
+              ? t('canceled')
+              : (item.errorMessage ?? t('errProvider'))}
           </Text>
         ) : null}
         <Text style={styles.itemMeta}>

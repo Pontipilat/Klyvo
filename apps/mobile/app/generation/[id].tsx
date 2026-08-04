@@ -241,7 +241,17 @@ export default function GenerationScreen() {
       {status === 'FAILED' || status === 'CANCELED' ? (
         <View style={styles.failure}>
           {generation?.errorMessage ? (
-            <Text style={styles.failureText}>{tError({ code: generation.errorCode })}</Text>
+            <>
+              <Text style={styles.failureText}>{tError({ code: generation.errorCode })}</Text>
+              {/*
+                Ответ провайдера показывается как есть: без него причина отказа
+                видна только в логах сервера, а пользователь может лишь гадать,
+                что именно не понравилось модели.
+              */}
+              <Text style={styles.failureDetail} selectable>
+                {generation.errorMessage}
+              </Text>
+            </>
           ) : null}
           <KlyvoButton
             fullWidth
@@ -347,4 +357,11 @@ const styles = StyleSheet.create({
   reservedLabel: { color: colors.textMuted, fontFamily: fonts.medium, fontSize: 12 },
   failure: { gap: spacing.md },
   failureText: { color: colors.error, fontFamily: fonts.medium, fontSize: 13, textAlign: 'center' },
+  failureDetail: {
+    color: colors.textMuted,
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'center',
+  },
 });

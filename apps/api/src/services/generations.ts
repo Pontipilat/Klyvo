@@ -218,6 +218,7 @@ async function dispatchGeneration(id: string) {
         },
       });
     } catch (error) {
+      logProviderFailure('create', id, error);
       await failGeneration(id, 'PROVIDER_CREATE_FAILED', providerErrorMessage(error));
     }
   })();
@@ -468,6 +469,7 @@ export async function syncGeneration(id: string, depth = 0): Promise<
       // и всплывает наружу — список генераций отвечал 500 из-за одной сбойной записи.
       return result ? await completeGeneration(id, result) : generation;
     } catch (error) {
+      logProviderFailure('result', id, error);
       if (error instanceof ProviderRequestError && error.terminal) {
         return failGeneration(id, 'PROVIDER_TASK_FAILED', providerErrorMessage(error));
       }
@@ -681,6 +683,28 @@ export function stopGenerationWorker() {
   if (!workerTimer) return;
   clearInterval(workerTimer);
   workerTimer = null;
+}
+
+/**
+ * Отказ провайдера пишется в лог целиком.
+ *
+ * В базу попадает только текст ошибки, а разбираться потом приходится по тому,
+ * какая модель и какой режим её вызвали — без этого в логах хостинга видно лишь
+ * «генерация не удалась», и причину искать негде.
+ */
+function logProviderFailure(stage: 'create' | 'result', id: string, error: unknown) {
+  const status = error instanceof ProviderRequestError ? error.statusCode : undefined;
+  // eslint-disable-next-line no-console
+  console.error(
+    JSON.stringify({
+      event: 'generation_provider_failed',
+      stage,
+      generationId: id,
+      status,
+      terminal: error instanceof ProviderRequestError ? error.terminal : undefined,
+      message: providerErrorMessage(error),
+    }),
+  );
 }
 
 function providerErrorMessage(error: unknown) {
