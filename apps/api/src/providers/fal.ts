@@ -162,7 +162,7 @@ function klingPayload(input: MediaGenerationInput, prompt: string) {
 }
 
 function seedreamPayload(input: MediaGenerationInput, prompt: string) {
-  return {
+  const base: Record<string, unknown> = {
     prompt,
     image_size:
       input.aspectRatio === 'SMART'
@@ -171,6 +171,8 @@ function seedreamPayload(input: MediaGenerationInput, prompt: string) {
     num_images: 1,
     output_format: 'jpeg',
   };
+  if (input.mode === 'IMAGE_TO_IMAGE') base.image_urls = [input.firstFrameUrl];
+  return base;
 }
 
 function seedancePayload(input: MediaGenerationInput, prompt: string) {

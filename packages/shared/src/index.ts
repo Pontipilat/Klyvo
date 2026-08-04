@@ -108,17 +108,15 @@ function klingTier(
     endpoints: {
       TEXT_TO_VIDEO: `${base}/text-to-video`,
       IMAGE_TO_VIDEO: `${base}/image-to-video`,
-      // Референсы есть только у o3 и только у двух уровней: у v3 такого режима нет вовсе.
-      ...(family === 'o3' && tier !== '4k'
-        ? { REFERENCE_TO_VIDEO: `${base}/reference-to-video` }
-        : {}),
+      // Режим по референсам есть у всех трёх уровней o3; у v3 его нет вовсе.
+      ...(family === 'o3' ? { REFERENCE_TO_VIDEO: `${base}/reference-to-video` } : {}),
     },
     supportsAudio: true,
     supportsFrames: false,
     supportsLastFrame: true,
     supportsStyle: true,
     supportsCameraMotion: true,
-    maxReferenceImages: family === 'o3' && tier !== '4k' ? 4 : 0,
+    maxReferenceImages: family === 'o3' ? 4 : 0,
     aspectRatios: KLING_ASPECT_RATIOS,
     resolutions: [resolution],
     durations: KLING_DURATIONS,
@@ -130,9 +128,9 @@ export const generationModels = [
   klingTier('v3', 'standard', '720p', 'Kling 3 Standard', 'Быстрый режим Kling 3: 720p, звук, до 15 секунд.', 1.2),
   klingTier('v3', 'pro', '1080p', 'Kling 3 Pro', 'Кинематографичный Kling 3: 1080p, звук, плавное движение.', 1.2),
   klingTier('v3', '4k', '4k', 'Kling 3 4K', 'Максимум Kling 3: настоящие 4K без апскейла.', 1.2),
-  klingTier('o3', 'standard', '720p', 'Kling O3 Standard', 'Новое поколение Kling: 720p и работа по референсам.', 1.3),
+  klingTier('o3', 'standard', '720p', 'Kling O3 Standard', 'Новое поколение Kling: 720p, референсы, до 15 секунд.', 1.3),
   klingTier('o3', 'pro', '1080p', 'Kling O3 Pro', 'Новое поколение Kling: 1080p, референсы, точная сцена.', 1.3),
-  klingTier('o3', '4k', '4k', 'Kling O3 4K', 'Новое поколение Kling в 4K.', 1.3),
+  klingTier('o3', '4k', '4k', 'Kling O3 4K', 'Новое поколение Kling в 4K, тоже с референсами.', 1.3),
   {
     id: 'seedance-2-0',
     kind: 'VIDEO',
@@ -202,8 +200,11 @@ export const generationModels = [
     kind: 'IMAGE',
     label: 'Seedream 5.0 Pro',
     provider: 'fal.ai · ByteDance',
-    description: 'Сильная работа с текстом на картинке и плотной композицией.',
-    endpoints: { TEXT_TO_IMAGE: 'bytedance/seedream/v5/pro/text-to-image' },
+    description: 'Сильная работа с текстом на картинке. Умеет править загруженную.',
+    endpoints: {
+      TEXT_TO_IMAGE: 'bytedance/seedream/v5/pro/text-to-image',
+      IMAGE_TO_IMAGE: 'bytedance/seedream/v5/pro/edit',
+    },
     supportsAudio: false,
     supportsFrames: false,
     supportsLastFrame: false,
@@ -221,8 +222,11 @@ export const generationModels = [
     kind: 'IMAGE',
     label: 'Seedream 5.0 Lite',
     provider: 'fal.ai · ByteDance',
-    description: 'Быстрый и дешёвый Seedream 5.0.',
-    endpoints: { TEXT_TO_IMAGE: 'fal-ai/bytedance/seedream/v5/lite/text-to-image' },
+    description: 'Быстрый и дешёвый Seedream 5.0. Умеет править загруженную.',
+    endpoints: {
+      TEXT_TO_IMAGE: 'fal-ai/bytedance/seedream/v5/lite/text-to-image',
+      IMAGE_TO_IMAGE: 'fal-ai/bytedance/seedream/v5/lite/edit',
+    },
     supportsAudio: false,
     supportsFrames: false,
     supportsLastFrame: false,
