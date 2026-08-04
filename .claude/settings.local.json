@@ -27,7 +27,9 @@
       "Bash(DATABASE_URL=file:./test.db npx prisma db push --skip-generate)",
       "Bash(pnpm --filter @klyvo/api build)",
       "Bash(npx eslint *)",
-      "Bash(grep -v \"^\\\\./\\\\.git/\")"
+      "Bash(grep -v \"^\\\\./\\\\.git/\")",
+      "Bash(git add *)",
+      "Bash(git commit *)"
     ]
   }
 }

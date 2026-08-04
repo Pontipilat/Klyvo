@@ -33,6 +33,7 @@ import {
   KlyvoConfirm,
   KlyvoErrorState,
   KlyvoIconButton,
+  KlyvoImageViewer,
   KlyvoScreen,
   KlyvoSkeleton,
   KlyvoToggle,
@@ -96,6 +97,7 @@ export default function VideoScreen() {
   const [regenerateOpen, setRegenerateOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
   const [settings, setSettings] = useState<PublicationSettingsDto>(defaultSettings);
 
   const query = useQuery({
@@ -202,9 +204,11 @@ export default function VideoScreen() {
       if (!permission.granted) throw new Error(t('galleryPermission'));
       const directory = FileSystem.cacheDirectory;
       if (!directory) throw new Error(t('genericError'));
+      // Расширение должно соответствовать содержимому: картинку с именем .mp4 галерея не примет.
+      const extension = video.mediaType === 'IMAGE' ? 'jpg' : 'mp4';
       const downloaded = await FileSystem.downloadAsync(
         video.videoUrl,
-        `${directory}klyvo-${video.id}.mp4`,
+        `${directory}klyvo-${video.id}.${extension}`,
       );
       await MediaLibrary.saveToLibraryAsync(downloaded.uri);
       toast.show(t('savedToGallery'));
@@ -286,11 +290,13 @@ export default function VideoScreen() {
 
       {/* Формат генерации надёжнее размеров из ответа провайдера — см. sizeFromAspectRatio. */}
       {isImage ? (
-        <Image
-          source={{ uri: video.videoUrl }}
-          resizeMode="contain"
-          style={[styles.image, { aspectRatio: mediaRatio.width / mediaRatio.height }]}
-        />
+        <Pressable onPress={() => setViewerOpen(true)}>
+          <Image
+            source={{ uri: video.videoUrl }}
+            resizeMode="contain"
+            style={[styles.image, { aspectRatio: mediaRatio.width / mediaRatio.height }]}
+          />
+        </Pressable>
       ) : (
         <KlyvoVideoPlayer
           uri={video.videoUrl}
@@ -488,6 +494,14 @@ export default function VideoScreen() {
         loading={retry.isPending}
         onConfirm={() => retry.mutate()}
         onClose={() => setRegenerateOpen(false)}
+      />
+
+      <KlyvoImageViewer
+        uri={video.videoUrl}
+        visible={isImage && viewerOpen}
+        closeLabel={t('close')}
+        hintLabel={t('zoomHint')}
+        onClose={() => setViewerOpen(false)}
       />
     </KlyvoScreen>
   );

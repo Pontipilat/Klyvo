@@ -99,6 +99,7 @@ export async function buildApp() {
     providerMode: config.PROVIDER_MODE,
     models: generationModels.map((model) => ({
       ...model,
+      // Возможности модели уходят целиком: по ним приложение строит набор настроек.
       modes: Object.keys(model.endpoints),
       available: true,
       // В mock-режиме модель не настоящая — приложение честно это показывает.

@@ -30,6 +30,8 @@ interface CreateState {
   enhancedPrompt?: string;
   firstFrame?: ReferenceAsset;
   lastFrame?: ReferenceAsset;
+  /** Картинки-референсы для режима «ролик по референсам». */
+  references: ReferenceAsset[];
   aspectRatio: AspectRatio;
   timingMode: TimingMode;
   duration: number;
@@ -91,6 +93,7 @@ function stateForModel(state: CreateState, model: GenerationModelInfo): Partial<
     generateAudio: model.supportsAudio ? state.generateAudio : false,
     timingMode: model.supportsFrames ? state.timingMode : 'DURATION',
     lastFrame: model.supportsLastFrame ? state.lastFrame : undefined,
+    references: state.references.slice(0, model.maxReferenceImages),
     aspectRatio: model.aspectRatios.includes(state.aspectRatio)
       ? state.aspectRatio
       : (model.aspectRatios[0] ?? state.aspectRatio),
@@ -109,6 +112,7 @@ const initial = {
   enhancedPrompt: undefined,
   firstFrame: undefined,
   lastFrame: undefined,
+  references: [] as ReferenceAsset[],
   aspectRatio: '9:16' as const,
   timingMode: 'DURATION' as const,
   duration: 5,

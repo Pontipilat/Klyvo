@@ -18,6 +18,8 @@ export interface CompletedMedia {
 export interface MediaGenerationInput extends GenerationInput {
   firstFrameUrl?: string;
   lastFrameUrl?: string;
+  /** Ссылки на картинки-референсы для режима REFERENCE_TO_VIDEO. */
+  referenceUrls?: string[];
 }
 
 export interface MediaGenerationProvider {

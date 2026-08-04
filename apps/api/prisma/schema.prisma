@@ -88,6 +88,8 @@ model Generation {
   generateAudio    Boolean             @default(true)
   firstFrameAssetId String?
   lastFrameAssetId String?
+  /** JSON-массив идентификаторов картинок-референсов для режима REFERENCE_TO_VIDEO. */
+  referenceAssetIds String?
   style            String
   cameraMotion     String
   creditCost       Int

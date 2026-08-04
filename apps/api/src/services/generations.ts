@@ -50,6 +50,17 @@ async function assetInputUrl(assetId: string | null, userId: string) {
   return `data:${asset.mimeType};base64,${buffer.toString('base64')}`;
 }
 
+/** Идентификаторы референсов хранятся строкой JSON: у SQLite нет массивов. */
+function parseReferenceIds(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 function scheduleGeneration(id: string) {
   setImmediate(() => {
     void dispatchGeneration(id);
@@ -94,9 +105,11 @@ export async function createGenerations(userId: string, input: GenerationInput) 
     throw new AppError(422, 'PROMPT_REJECTED', moderation.reason ?? 'Prompt rejected');
   }
 
-  const assetIds = [input.firstFrameAssetId, input.lastFrameAssetId].filter(
-    (value): value is string => Boolean(value),
-  );
+  const assetIds = [
+    input.firstFrameAssetId,
+    input.lastFrameAssetId,
+    ...(input.referenceAssetIds ?? []),
+  ].filter((value): value is string => Boolean(value));
   if (assetIds.length) {
     const assets = await prisma.generationAsset.findMany({
       where: { id: { in: assetIds }, userId, type: 'IMAGE' },
@@ -138,6 +151,9 @@ export async function createGenerations(userId: string, input: GenerationInput) 
           generateAudio: input.generateAudio,
           firstFrameAssetId: input.firstFrameAssetId,
           lastFrameAssetId: input.lastFrameAssetId,
+          referenceAssetIds: input.referenceAssetIds?.length
+            ? JSON.stringify(input.referenceAssetIds)
+            : null,
           style: input.style,
           cameraMotion: input.cameraMotion,
           creditCost: singleCost,
@@ -180,11 +196,17 @@ async function dispatchGeneration(id: string) {
       const generation = await prisma.generation.findUnique({ where: { id } });
       if (!generation || terminalStatuses.has(generation.status) || generation.providerTaskId) return;
       const enhancedPrompt = await englishPromptFor(generation);
+      const referenceIds = parseReferenceIds(generation.referenceAssetIds);
       const providerInput: MediaGenerationInput = {
         ...toGenerationInput(generation),
         enhancedPrompt,
         firstFrameUrl: await assetInputUrl(generation.firstFrameAssetId, generation.userId),
         lastFrameUrl: await assetInputUrl(generation.lastFrameAssetId, generation.userId),
+        referenceUrls: await Promise.all(
+          referenceIds.map(async (assetId) =>
+            (await assetInputUrl(assetId, generation.userId)) ?? '',
+          ),
+        ).then((urls) => urls.filter(Boolean)),
       };
       const providerTask = await mediaGenerationProvider.create(providerInput);
       await prisma.generation.update({
@@ -677,6 +699,7 @@ export function toGenerationInput(source: Generation): GenerationInput {
     enhancedPrompt: source.enhancedPrompt ?? undefined,
     firstFrameAssetId: source.firstFrameAssetId ?? undefined,
     lastFrameAssetId: source.lastFrameAssetId ?? undefined,
+    referenceAssetIds: parseReferenceIds(source.referenceAssetIds),
     aspectRatio: source.aspectRatio as GenerationInput['aspectRatio'],
     timingMode: source.timingMode as GenerationInput['timingMode'],
     duration: source.duration,

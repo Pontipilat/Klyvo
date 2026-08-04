@@ -101,7 +101,8 @@ export default function FeedScreen() {
    * Вид входит в ключ запроса, иначе при переключении отдавался бы старый кэш.
    */
   const kind = createStore.kind;
-  const section: FeedSection = kind === 'IMAGE' ? 'image' : 'video';
+  const isImageFeed = kind === 'IMAGE';
+  const section: FeedSection = isImageFeed ? 'image' : 'video';
   const feedKey = ['feed', kind] as const;
 
   const feed = useInfiniteQuery({
@@ -180,6 +181,7 @@ export default function FeedScreen() {
 
   const cost = describeGenerationCost({
     mode: createStore.mode,
+    modelId: createStore.modelId,
     timingMode: createStore.timingMode,
     duration: createStore.duration,
     frames: createStore.frames,
@@ -213,7 +215,8 @@ export default function FeedScreen() {
       setQuickOpen(false);
       setComposeText('');
       createStore.set('firstFrame', undefined);
-      createStore.set('mode', 'TEXT_TO_VIDEO');
+      // Возврат к режиму без исходной картинки — но того же вида, что выбран сейчас.
+      createStore.set('mode', isImageFeed ? 'TEXT_TO_IMAGE' : 'TEXT_TO_VIDEO');
       void queryClient.invalidateQueries({ queryKey: ['generations'] });
       void queryClient.invalidateQueries({ queryKey: ['wallet'] });
       const first = generations[0];
@@ -348,8 +351,8 @@ export default function FeedScreen() {
       return (
         <View style={[styles.center, { paddingTop: headerHeight }]}>
           <KlyvoEmptyState
-            title={t('feedEmptyTitle')}
-            body={t('feedEmptyBody')}
+            title={isImageFeed ? t('feedEmptyImagesTitle') : t('feedEmptyTitle')}
+            body={isImageFeed ? t('feedEmptyImagesBody') : t('feedEmptyBody')}
             actionLabel={t('create')}
             onAction={() => router.push('/(tabs)/create')}
           />

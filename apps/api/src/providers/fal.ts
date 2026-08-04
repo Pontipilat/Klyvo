@@ -1,6 +1,5 @@
 import {
   findGenerationModel,
-  kindForMode,
   type AspectRatio,
   type GenerationMode,
   type Resolution,
@@ -100,18 +99,37 @@ const IMAGE_SIZE: Record<AspectRatio, string> = {
   '9:16': 'portrait_16_9',
 };
 
+/** У Seedream «качество» — это размер холста, а автоформат называется иначе, чем у OpenAI. */
+const SEEDREAM_AUTO_SIZE: Partial<Record<Resolution, string>> = {
+  '720p': 'auto_1K',
+  '1080p': 'auto_2K',
+  '4k': 'auto_4K',
+};
+
 /**
  * Промпт для модели: перевод (если он есть) плюс стиль и движение камеры.
- * Отдельных полей под них у fal нет — они уходят частью текста.
+ * Отдельных полей под них у fal нет — они уходят частью текста, и только тем
+ * моделям, для которых имеют смысл.
  */
 function promptFor(input: MediaGenerationInput) {
   const details = [input.enhancedPrompt || input.prompt];
-  if (input.style !== 'NONE') details.push(`Visual style: ${input.style.toLowerCase()}.`);
-  // У картинки движения камеры нет — такая приписка только сбивала бы модель.
-  if (input.cameraMotion !== 'AUTO' && kindForMode(input.mode) === 'VIDEO') {
+  const model = findGenerationModel(input.modelId);
+  if (input.style !== 'NONE' && model?.supportsStyle) {
+    details.push(`Visual style: ${input.style.toLowerCase()}.`);
+  }
+  if (input.cameraMotion !== 'AUTO' && model?.supportsCameraMotion) {
     details.push(`Camera movement: ${input.cameraMotion.toLowerCase().replaceAll('_', ' ')}.`);
   }
   return details.join(' ');
+}
+
+/**
+ * Kling v3 и Kling o3 принимают исходный кадр под разными именами: `start_image_url`
+ * у v3 и `image_url` у o3. Ошибиться здесь легко, а поймать трудно — запрос уйдёт
+ * и вернётся ошибкой валидации уже от fal.
+ */
+function klingFrameField(modelId: string) {
+  return modelId.startsWith('kling-o3-') ? 'image_url' : 'start_image_url';
 }
 
 function klingPayload(input: MediaGenerationInput, prompt: string) {
@@ -120,14 +138,39 @@ function klingPayload(input: MediaGenerationInput, prompt: string) {
     duration: String(input.duration),
     generate_audio: input.generateAudio,
   };
+  if (input.mode === 'REFERENCE_TO_VIDEO') {
+    /**
+     * Референсы адресуются в промпте как @Image1, @Image2 — без этой подсказки
+     * модель не понимает, к чему они относятся, и просто их игнорирует.
+     */
+    const references = input.referenceUrls ?? [];
+    base.image_urls = references;
+    base.aspect_ratio = input.aspectRatio === 'SMART' ? '16:9' : input.aspectRatio;
+    base.prompt = `${prompt} Use ${references
+      .map((_, index) => `@Image${index + 1}`)
+      .join(', ')} as visual references.`;
+    return base;
+  }
   if (input.mode === 'IMAGE_TO_VIDEO') {
-    base.start_image_url = input.firstFrameUrl;
+    base[klingFrameField(input.modelId)] = input.firstFrameUrl;
     if (input.lastFrameUrl) base.end_image_url = input.lastFrameUrl;
     // Формат кадра у image-to-video берётся из самого изображения.
     return base;
   }
   base.aspect_ratio = input.aspectRatio === 'SMART' ? '16:9' : input.aspectRatio;
   return base;
+}
+
+function seedreamPayload(input: MediaGenerationInput, prompt: string) {
+  return {
+    prompt,
+    image_size:
+      input.aspectRatio === 'SMART'
+        ? (SEEDREAM_AUTO_SIZE[input.resolution] ?? 'auto_2K')
+        : IMAGE_SIZE[input.aspectRatio],
+    num_images: 1,
+    output_format: 'jpeg',
+  };
 }
 
 function seedancePayload(input: MediaGenerationInput, prompt: string) {
@@ -165,6 +208,7 @@ function payloadFor(input: MediaGenerationInput) {
   const prompt = promptFor(input);
   if (input.modelId.startsWith('kling-')) return klingPayload(input, prompt);
   if (input.modelId.startsWith('seedance-')) return seedancePayload(input, prompt);
+  if (input.modelId.startsWith('seedream-')) return seedreamPayload(input, prompt);
   return imagePayload(input, prompt);
 }
 
@@ -241,9 +285,7 @@ export class FalProvider implements MediaGenerationProvider {
 
   private fallbackTaskUrl(endpoint: string, requestId?: string) {
     if (!requestId) return null;
-    // Статус и результат живут на уровне приложения — без «подпути» модели.
-    const appId = endpoint.split('/').slice(0, 2).join('/');
-    return `${this.queueUrl}/${appId}/requests/${requestId}`;
+    return `${this.queueUrl}/${endpoint}/requests/${requestId}`;
   }
 
   async result(taskId: string): Promise<CompletedMedia | null> {

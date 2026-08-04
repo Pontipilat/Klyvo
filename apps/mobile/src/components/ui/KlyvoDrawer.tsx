@@ -1,7 +1,13 @@
 import type { ComponentType, ReactNode } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { FadeIn, FadeOut, SlideInLeft, SlideOutLeft } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  FadeIn,
+  FadeOut,
+  SlideInLeft,
+  SlideOutLeft,
+} from 'react-native-reanimated';
 import type { LucideProps } from 'lucide-react-native';
 import { colors, fonts, radii, spacing } from '../../theme';
 
@@ -45,8 +51,9 @@ export function KlyvoDrawer({
       >
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <Animated.View
-          entering={SlideInLeft.springify().damping(22)}
-          exiting={SlideOutLeft.duration(180)}
+          // Пружина проскакивала конечную точку и качалась вокруг неё — меню дёргалось.
+          entering={SlideInLeft.duration(260).easing(Easing.out(Easing.cubic))}
+          exiting={SlideOutLeft.duration(180).easing(Easing.in(Easing.cubic))}
           style={[styles.panel, { paddingTop: insets.top + spacing.lg, paddingBottom: insets.bottom + spacing.lg }]}
         >
           <Text style={styles.brand}>{title}</Text>

@@ -3,6 +3,8 @@ import { z } from 'zod';
 export const generationModes = [
   'TEXT_TO_VIDEO',
   'IMAGE_TO_VIDEO',
+  /** Ролик по нескольким картинкам-референсам: на них модель ориентируется по стилю и героям. */
+  'REFERENCE_TO_VIDEO',
   'TEXT_TO_IMAGE',
   'IMAGE_TO_IMAGE',
 ] as const;
@@ -69,6 +71,12 @@ export interface GenerationModelInfo {
   supportsFrames: boolean;
   /** Модель умеет доводить ролик до заданного последнего кадра. */
   supportsLastFrame: boolean;
+  /** Стиль имеет смысл: он уходит припиской к промпту. */
+  supportsStyle: boolean;
+  /** Движение камеры имеет смысл — у картинок его нет. */
+  supportsCameraMotion: boolean;
+  /** Сколько картинок-референсов принимает режим REFERENCE_TO_VIDEO. 0 — режима нет. */
+  maxReferenceImages: number;
   aspectRatios: readonly AspectRatio[];
   resolutions: readonly Resolution[];
   durations: readonly number[];
@@ -79,62 +87,52 @@ export interface GenerationModelInfo {
 const KLING_ASPECT_RATIOS = ['16:9', '9:16', '1:1'] as const;
 const KLING_DURATIONS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
 const SEEDANCE_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
+const IMAGE_ASPECT_RATIOS = ['SMART', '16:9', '4:3', '1:1', '3:4', '9:16'] as const;
+
+/** Общая часть описания для трёх уровней качества Kling — они отличаются только им. */
+function klingTier(
+  family: 'v3' | 'o3',
+  tier: 'standard' | 'pro' | '4k',
+  resolution: Resolution,
+  label: string,
+  description: string,
+  priceMultiplier: number,
+) {
+  const base = `fal-ai/kling-video/${family}/${tier}`;
+  return {
+    id: `kling-${family === 'v3' ? '3' : 'o3'}-${tier}`,
+    kind: 'VIDEO',
+    label,
+    provider: 'fal.ai · Kuaishou',
+    description,
+    endpoints: {
+      TEXT_TO_VIDEO: `${base}/text-to-video`,
+      IMAGE_TO_VIDEO: `${base}/image-to-video`,
+      // Референсы есть только у o3 и только у двух уровней: у v3 такого режима нет вовсе.
+      ...(family === 'o3' && tier !== '4k'
+        ? { REFERENCE_TO_VIDEO: `${base}/reference-to-video` }
+        : {}),
+    },
+    supportsAudio: true,
+    supportsFrames: false,
+    supportsLastFrame: true,
+    supportsStyle: true,
+    supportsCameraMotion: true,
+    maxReferenceImages: family === 'o3' && tier !== '4k' ? 4 : 0,
+    aspectRatios: KLING_ASPECT_RATIOS,
+    resolutions: [resolution],
+    durations: KLING_DURATIONS,
+    priceMultiplier,
+  } as const satisfies GenerationModelInfo;
+}
 
 export const generationModels = [
-  {
-    id: 'kling-3-standard',
-    kind: 'VIDEO',
-    label: 'Kling 3 Standard',
-    provider: 'fal.ai · Kuaishou',
-    description: 'Быстрый режим Kling 3: 720p, звук, до 15 секунд.',
-    endpoints: {
-      TEXT_TO_VIDEO: 'fal-ai/kling-video/v3/standard/text-to-video',
-      IMAGE_TO_VIDEO: 'fal-ai/kling-video/v3/standard/image-to-video',
-    },
-    supportsAudio: true,
-    supportsFrames: false,
-    supportsLastFrame: true,
-    aspectRatios: KLING_ASPECT_RATIOS,
-    resolutions: ['720p'],
-    durations: KLING_DURATIONS,
-    priceMultiplier: 1.2,
-  },
-  {
-    id: 'kling-3-pro',
-    kind: 'VIDEO',
-    label: 'Kling 3 Pro',
-    provider: 'fal.ai · Kuaishou',
-    description: 'Кинематографичный режим Kling 3: 1080p, звук, плавное движение.',
-    endpoints: {
-      TEXT_TO_VIDEO: 'fal-ai/kling-video/v3/pro/text-to-video',
-      IMAGE_TO_VIDEO: 'fal-ai/kling-video/v3/pro/image-to-video',
-    },
-    supportsAudio: true,
-    supportsFrames: false,
-    supportsLastFrame: true,
-    aspectRatios: KLING_ASPECT_RATIOS,
-    resolutions: ['1080p'],
-    durations: KLING_DURATIONS,
-    priceMultiplier: 1.2,
-  },
-  {
-    id: 'kling-3-4k',
-    kind: 'VIDEO',
-    label: 'Kling 3 4K',
-    provider: 'fal.ai · Kuaishou',
-    description: 'Максимальное качество Kling 3: настоящие 4K без апскейла.',
-    endpoints: {
-      TEXT_TO_VIDEO: 'fal-ai/kling-video/v3/4k/text-to-video',
-      IMAGE_TO_VIDEO: 'fal-ai/kling-video/v3/4k/image-to-video',
-    },
-    supportsAudio: true,
-    supportsFrames: false,
-    supportsLastFrame: true,
-    aspectRatios: KLING_ASPECT_RATIOS,
-    resolutions: ['4k'],
-    durations: KLING_DURATIONS,
-    priceMultiplier: 1.2,
-  },
+  klingTier('v3', 'standard', '720p', 'Kling 3 Standard', 'Быстрый режим Kling 3: 720p, звук, до 15 секунд.', 1.2),
+  klingTier('v3', 'pro', '1080p', 'Kling 3 Pro', 'Кинематографичный Kling 3: 1080p, звук, плавное движение.', 1.2),
+  klingTier('v3', '4k', '4k', 'Kling 3 4K', 'Максимум Kling 3: настоящие 4K без апскейла.', 1.2),
+  klingTier('o3', 'standard', '720p', 'Kling O3 Standard', 'Новое поколение Kling: 720p и работа по референсам.', 1.3),
+  klingTier('o3', 'pro', '1080p', 'Kling O3 Pro', 'Новое поколение Kling: 1080p, референсы, точная сцена.', 1.3),
+  klingTier('o3', '4k', '4k', 'Kling O3 4K', 'Новое поколение Kling в 4K.', 1.3),
   {
     id: 'seedance-2-0',
     kind: 'VIDEO',
@@ -148,6 +146,9 @@ export const generationModels = [
     supportsAudio: true,
     supportsFrames: false,
     supportsLastFrame: true,
+    supportsStyle: true,
+    supportsCameraMotion: true,
+    maxReferenceImages: 0,
     aspectRatios: aspectRatios,
     resolutions: resolutions,
     durations: SEEDANCE_DURATIONS,
@@ -166,6 +167,9 @@ export const generationModels = [
     supportsAudio: true,
     supportsFrames: false,
     supportsLastFrame: true,
+    supportsStyle: true,
+    supportsCameraMotion: true,
+    maxReferenceImages: 0,
     aspectRatios: aspectRatios,
     resolutions: ['480p', '720p'],
     durations: SEEDANCE_DURATIONS,
@@ -184,11 +188,51 @@ export const generationModels = [
     supportsAudio: false,
     supportsFrames: false,
     supportsLastFrame: false,
-    aspectRatios: ['SMART', '16:9', '4:3', '1:1', '3:4', '9:16'],
+    supportsStyle: true,
+    supportsCameraMotion: false,
+    maxReferenceImages: 0,
+    aspectRatios: IMAGE_ASPECT_RATIOS,
     // Разрешение здесь — это уровень качества у GPT Image 2: low / medium / high.
     resolutions: ['480p', '720p', '1080p'],
     durations: [],
     priceMultiplier: 1,
+  },
+  {
+    id: 'seedream-5-pro',
+    kind: 'IMAGE',
+    label: 'Seedream 5.0 Pro',
+    provider: 'fal.ai · ByteDance',
+    description: 'Сильная работа с текстом на картинке и плотной композицией.',
+    endpoints: { TEXT_TO_IMAGE: 'bytedance/seedream/v5/pro/text-to-image' },
+    supportsAudio: false,
+    supportsFrames: false,
+    supportsLastFrame: false,
+    supportsStyle: true,
+    supportsCameraMotion: false,
+    maxReferenceImages: 0,
+    aspectRatios: IMAGE_ASPECT_RATIOS,
+    // У Seedream качество — это размер: 2K или 4K.
+    resolutions: ['1080p', '4k'],
+    durations: [],
+    priceMultiplier: 1.1,
+  },
+  {
+    id: 'seedream-5-lite',
+    kind: 'IMAGE',
+    label: 'Seedream 5.0 Lite',
+    provider: 'fal.ai · ByteDance',
+    description: 'Быстрый и дешёвый Seedream 5.0.',
+    endpoints: { TEXT_TO_IMAGE: 'fal-ai/bytedance/seedream/v5/lite/text-to-image' },
+    supportsAudio: false,
+    supportsFrames: false,
+    supportsLastFrame: false,
+    supportsStyle: true,
+    supportsCameraMotion: false,
+    maxReferenceImages: 0,
+    aspectRatios: IMAGE_ASPECT_RATIOS,
+    resolutions: ['720p', '1080p', '4k'],
+    durations: [],
+    priceMultiplier: 0.6,
   },
 ] as const satisfies readonly GenerationModelInfo[];
 
@@ -209,8 +253,18 @@ export function kindForMode(mode: GenerationMode): GenerationKind {
   return mode === 'TEXT_TO_IMAGE' || mode === 'IMAGE_TO_IMAGE' ? 'IMAGE' : 'VIDEO';
 }
 
+/** Модели, которыми можно выполнить этот вид генерации. */
+export function modelsForKind(kind: GenerationKind): readonly GenerationModelInfo[] {
+  return generationModels.filter((model) => model.kind === kind);
+}
+
 export function modeIsImageInput(mode: GenerationMode): boolean {
   return mode === 'IMAGE_TO_VIDEO' || mode === 'IMAGE_TO_IMAGE';
+}
+
+/** Режим работает по набору картинок-референсов, а не по одному кадру. */
+export function modeUsesReferences(mode: GenerationMode): boolean {
+  return mode === 'REFERENCE_TO_VIDEO';
 }
 
 /** Модель по умолчанию для режима — используется, когда клиент её не прислал. */
@@ -226,6 +280,8 @@ export const generationInputSchema = z
     enhancedPrompt: z.string().trim().max(3000).optional(),
     firstFrameAssetId: z.string().min(1).optional(),
     lastFrameAssetId: z.string().min(1).optional(),
+    /** Картинки-референсы: на них модель ориентируется, кадром они не становятся. */
+    referenceAssetIds: z.array(z.string().min(1)).max(4).optional(),
     aspectRatio: z.enum(aspectRatios),
     timingMode: z.enum(timingModes).default('DURATION'),
     duration: z.coerce.number().int().min(3).max(15).default(5),
@@ -238,6 +294,13 @@ export const generationInputSchema = z
     forceFailure: z.boolean().optional().default(false),
   })
   .superRefine((value, context) => {
+    if (modeUsesReferences(value.mode) && !value.referenceAssetIds?.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['referenceAssetIds'],
+        message: 'At least one reference image is required for this mode',
+      });
+    }
     if (modeIsImageInput(value.mode) && !value.firstFrameAssetId) {
       context.addIssue({
         code: 'custom',
@@ -310,6 +373,13 @@ export const generationInputSchema = z
         message: `${model.label} does not support ${value.duration}s`,
       });
     }
+    if (value.referenceAssetIds?.length && value.referenceAssetIds.length > model.maxReferenceImages) {
+      context.addIssue({
+        code: 'custom',
+        path: ['referenceAssetIds'],
+        message: `${model.label} accepts at most ${model.maxReferenceImages} reference images`,
+      });
+    }
     if (model.kind === 'IMAGE' && value.lastFrameAssetId) {
       context.addIssue({
         code: 'custom',
@@ -347,6 +417,7 @@ export const PRICE_CONFIG = {
   modeSurcharge: {
     TEXT_TO_VIDEO: 0,
     IMAGE_TO_VIDEO: 2,
+    REFERENCE_TO_VIDEO: 3,
     TEXT_TO_IMAGE: 0,
     IMAGE_TO_IMAGE: 1,
   },

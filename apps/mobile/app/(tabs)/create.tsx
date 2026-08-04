@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -12,7 +12,6 @@ import {
   Cpu,
   Info,
   ImagePlus,
-  Languages,
   Minus,
   Plus,
   Sparkles,
@@ -22,6 +21,7 @@ import {
 import {
   describeGenerationCost,
   modeIsImageInput,
+  modeUsesReferences,
   type GenerationMode,
   type GenerationModelInfo,
   type Resolution,
@@ -170,10 +170,6 @@ export default function CreateScreen() {
     generateAudio: state.generateAudio,
   });
   const available = wallet.data?.availableBalance ?? 0;
-  const detectedLanguage = useMemo(
-    () => (/[әіңғүұқөһ]/iu.test(state.prompt) ? 'KK' : /[а-яё]/iu.test(state.prompt) ? 'RU' : 'EN'),
-    [state.prompt],
-  );
 
   /**
    * Список моделей и признак «подключена сейчас» приходят с сервера,
@@ -199,6 +195,15 @@ export default function CreateScreen() {
   const durationOptions = activeModel?.durations ?? [5];
   const framesSupported = (models.data?.models ?? []).some((model) => model.supportsFrames);
   /** Качество у картинки — это уровень детализации у модели, а не разрешение видео. */
+  const modeOptions = (activeModel?.modes ?? []).map((mode) => ({
+    value: mode,
+    label: modeUsesReferences(mode)
+      ? t('modeReference')
+      : modeIsImageInput(mode)
+        ? t('modeImage')
+        : t('modeText'),
+  }));
+  const maxReferences = activeModel?.maxReferenceImages ?? 0;
   const imageQualityLabels: Record<string, string> = {
     '480p': t('imageQualityLow'),
     '720p': t('imageQualityMedium'),
@@ -215,6 +220,9 @@ export default function CreateScreen() {
           prompt: state.prompt,
           firstFrameAssetId: state.firstFrame?.id,
           lastFrameAssetId: state.lastFrame?.id,
+          referenceAssetIds: modeUsesReferences(state.mode)
+            ? state.references.map((asset) => asset.id)
+            : undefined,
           aspectRatio: state.aspectRatio,
           timingMode: state.timingMode,
           duration: state.duration,
@@ -241,7 +249,7 @@ export default function CreateScreen() {
     onError: (error) => toast.show(tError(error), 'error'),
   });
 
-  const pickFrame = async (target: 'firstFrame' | 'lastFrame') => {
+  const pickFrame = async (target: 'firstFrame' | 'lastFrame' | 'references') => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 0.92,
@@ -267,11 +275,16 @@ export default function CreateScreen() {
         body,
         timeoutMs: 60_000,
       });
-      state.set(target, {
+      const asset = {
         id: response.asset.id,
         uri: selected.uri,
         mimeType: response.asset.mimeType,
-      });
+      };
+      if (target === 'references') {
+        state.set('references', [...state.references, asset].slice(0, maxReferences));
+        return;
+      }
+      state.set(target, asset);
       // Загруженный кадр означает, что генерируем из него — режим переключается сам.
       if (activeModel) state.applyModel(activeModel);
     } catch (error) {
@@ -303,7 +316,9 @@ export default function CreateScreen() {
   };
 
   const promptReady = state.prompt.trim().length >= 3;
-  const frameReady = !modeIsImageInput(state.mode) || Boolean(state.firstFrame);
+  const frameReady = modeUsesReferences(state.mode)
+    ? state.references.length > 0
+    : !modeIsImageInput(state.mode) || Boolean(state.firstFrame);
   const enoughCredits = available >= cost.total;
   const canGenerate = promptReady && frameReady && enoughCredits;
   // Кнопка больше не «просто серая»: всегда видно, чего именно не хватает.
@@ -396,21 +411,14 @@ export default function CreateScreen() {
             </KlyvoCard>
           ) : null}
 
-          <KlyvoSegmentedControl
-            value={state.mode}
-            options={
-              isImage
-                ? [
-                    { value: 'TEXT_TO_IMAGE' as const, label: t('modeText') },
-                    { value: 'IMAGE_TO_IMAGE' as const, label: t('modeImage') },
-                  ]
-                : [
-                    { value: 'TEXT_TO_VIDEO' as const, label: t('modeText') },
-                    { value: 'IMAGE_TO_VIDEO' as const, label: t('modeImage') },
-                  ]
-            }
-            onChange={(mode) => state.set('mode', mode)}
-          />
+          {/* Режимы берутся у выбранной модели: у Seedream, например, есть только текст. */}
+          {modeOptions.length > 1 ? (
+            <KlyvoSegmentedControl
+              value={state.mode}
+              options={modeOptions}
+              onChange={(mode) => state.set('mode', mode)}
+            />
+          ) : null}
 
           <KlyvoCard style={styles.promptCard} accent>
             <View style={styles.rowBetween}>
@@ -426,14 +434,49 @@ export default function CreateScreen() {
                 state.set('enhancedPrompt', undefined);
               }}
             />
-            {/* Перевод делается автоматически на сервере — кнопки для этого больше нет. */}
-            <View style={styles.promptActions}>
-              <Languages color={colors.textMuted} size={15} />
-              <Text style={styles.translateNote}>
-                {t('promptLanguage')}: {detectedLanguage} · {t('autoTranslateNote')}
-              </Text>
-            </View>
           </KlyvoCard>
+
+          {modeUsesReferences(state.mode) ? (
+            <View style={styles.optionGroup}>
+              <View style={styles.optionHeading}>
+                <Text style={styles.label}>{t('referenceImages')}</Text>
+                <Text style={styles.hint}>{t('referenceHint')}</Text>
+              </View>
+              <View style={styles.wrap}>
+                {state.references.map((asset) => (
+                  <View key={asset.id} style={styles.referenceTile}>
+                    <Image source={{ uri: asset.uri }} style={StyleSheet.absoluteFill} />
+                    <KlyvoIconButton
+                      icon={Trash2}
+                      label={t('removeFrame')}
+                      size={30}
+                      onPress={() =>
+                        state.set(
+                          'references',
+                          state.references.filter((item) => item.id !== asset.id),
+                        )
+                      }
+                      style={styles.removeFrame}
+                    />
+                  </View>
+                ))}
+                {state.references.length < maxReferences ? (
+                  <Pressable
+                    disabled={uploading}
+                    onPress={() => void pickFrame('references')}
+                    style={({ pressed }) => [
+                      styles.referenceTile,
+                      styles.referenceAdd,
+                      uploading && styles.disabled,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <ImagePlus color={colors.textMuted} size={20} />
+                  </Pressable>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
 
           {modeIsImageInput(state.mode) ? (
             <View style={styles.framesRow}>
@@ -602,14 +645,16 @@ export default function CreateScreen() {
                 onChange={(value) => state.set('buildQuantity', value)}
               />
 
-              <OptionGroup
-                title={t('style')}
-                value={state.style}
-                options={styleOptions.map(([value, label]) => ({ value, label }))}
-                onChange={(value) => state.set('style', value)}
-              />
+              {activeModel?.supportsStyle !== false ? (
+                <OptionGroup
+                  title={t('style')}
+                  value={state.style}
+                  options={styleOptions.map(([value, label]) => ({ value, label }))}
+                  onChange={(value) => state.set('style', value)}
+                />
+              ) : null}
 
-              {!isImage ? (
+              {activeModel?.supportsCameraMotion ? (
                 <OptionGroup
                   title={t('camera')}
                   value={state.cameraMotion}
@@ -720,7 +765,6 @@ export default function CreateScreen() {
             );
           })}
         </View>
-        <Text style={styles.hint}>{t('autoTranslateNote')}</Text>
       </KlyvoBottomSheet>
     </View>
   );
@@ -807,6 +851,16 @@ const styles = StyleSheet.create({
   submittedTitle: { color: colors.text, fontFamily: fonts.semibold, fontSize: 14 },
   submittedText: { color: colors.textMuted, fontFamily: fonts.regular, fontSize: 12, lineHeight: 17 },
   framesRow: { flexDirection: 'row', gap: spacing.md },
+  referenceTile: {
+    backgroundColor: colors.surfaceRaised,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    height: 84,
+    overflow: 'hidden',
+    width: 84,
+  },
+  referenceAdd: { alignItems: 'center', justifyContent: 'center' },
   frameColumn: { flex: 1, gap: spacing.sm },
   frameLabelRow: { alignItems: 'baseline', flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
   framePreview: {

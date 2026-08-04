@@ -103,10 +103,18 @@ export class DeepSeekProvider implements PromptEnhancementProvider {
      * но пользователь не должен получить чужую фантазию вместо своей сцены.
      * Ничего не добавляем, ничего не убираем, порядок и детали сохраняем.
      */
+    /**
+     * Текст, который просят нарисовать НА картинке или в кадре, переводить нельзя.
+     * «Создай картинку с текстом привет» должно остаться «привет», а не стать
+     * «hello»: пользователь просил надпись на своём языке, и перевод её ломает.
+     * Переводится только описание сцены.
+     */
     const isTranslation = mode === 'TRANSLATE';
+    const literalTextRule =
+      ' CRITICAL: any text the user wants rendered inside the image or video — usually in quotes, or after wording like "с текстом", "надпись", "the text", "that says" — must be copied character for character in its ORIGINAL language and script. Never translate or transliterate it. Wrap it in double quotes and add the language name, for example: the text "привет" written in Russian. If the user explicitly asks for the on-screen text in some other language, follow that instruction instead.';
     const system = isTranslation
-      ? 'You are a literal translator. Translate the user text into English exactly as written: keep every subject, action, object, number, colour and detail, add nothing, remove nothing, do not embellish and do not turn it into a stylised prompt. If the text is already English, return it unchanged. Reply with the translation only — no quotes, no markdown, no commentary.'
-      : 'You write production-ready prompts for an AI video generator. Return only one English prompt as plain text, without headings, quotes, markdown, or commentary.';
+      ? `You are a literal translator. Translate the user text into English exactly as written: keep every subject, action, object, number, colour and detail, add nothing, remove nothing, do not embellish and do not turn it into a stylised prompt. If the text is already English, return it unchanged. Reply with the translation only — no quotes around the whole answer, no markdown, no commentary.${literalTextRule}`
+      : `You write production-ready prompts for an AI video generator. Return only one English prompt as plain text, without headings, quotes, markdown, or commentary.${literalTextRule}`;
     const instructions: Record<string, string> = {
       TRANSLATE: 'Translate literally into English.',
       ENHANCE: 'Improve clarity, visual specificity, motion, lighting, and shot composition.',
