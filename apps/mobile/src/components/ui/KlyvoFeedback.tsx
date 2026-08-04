@@ -1,8 +1,9 @@
 import type { ComponentType, ReactNode } from 'react';
 import { useEffect } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { LucideProps } from 'lucide-react-native';
 import Animated, {
+  Easing,
   FadeIn,
   FadeOut,
   SlideInDown,
@@ -93,9 +94,15 @@ export function KlyvoBottomSheet({ visible, title, onClose, children }: SheetPro
         style={styles.overlay}
       >
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        {/**
+         * Раньше здесь была пружина: она проскакивает конечную точку и качается
+         * вокруг неё, из-за чего шторка при открытии заметно дёргалась. Обычное
+         * движение с замедлением к концу спокойнее и останавливается ровно там,
+         * где должно.
+         */}
         <Animated.View
-          entering={SlideInDown.springify().damping(20)}
-          exiting={SlideOutDown.duration(180)}
+          entering={SlideInDown.duration(260).easing(Easing.out(Easing.cubic))}
+          exiting={SlideOutDown.duration(180).easing(Easing.in(Easing.cubic))}
           style={styles.sheet}
         >
           <View style={styles.handle} />
@@ -103,7 +110,15 @@ export function KlyvoBottomSheet({ visible, title, onClose, children }: SheetPro
             <Text style={styles.sheetTitle}>{title}</Text>
             <KlyvoIconButton icon={X} label={title} size={36} onPress={onClose} />
           </View>
-          {children}
+          {/* Содержимое длиннее экрана обязано листаться: иначе до нижних пунктов не добраться. */}
+          <ScrollView
+            style={styles.sheetScroll}
+            contentContainerStyle={styles.sheetContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {children}
+          </ScrollView>
         </Animated.View>
       </Animated.View>
     </Modal>
@@ -257,6 +272,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
   },
+  // flexShrink позволяет списку ужаться внутри шторки, ограниченной по высоте.
+  sheetScroll: { flexGrow: 0, flexShrink: 1 },
+  sheetContent: { gap: spacing.lg, paddingBottom: spacing.sm },
   handle: {
     alignSelf: 'center',
     backgroundColor: 'rgba(255,255,255,0.18)',

@@ -32,7 +32,9 @@ interface GenerationPage {
 export default function LibraryScreen() {
   const router = useRouter();
   const { t } = useTranslation();
-  const [filter, setFilter] = useState<'ALL' | 'READY' | 'ACTIVE' | 'PUBLISHED' | 'ERROR'>('ALL');
+  const [filter, setFilter] = useState<
+    'ALL' | 'VIDEO' | 'IMAGE' | 'READY' | 'ACTIVE' | 'PUBLISHED' | 'ERROR'
+  >('ALL');
   const [layout, setLayout] = useState<'grid' | 'list'>('grid');
   const [search, setSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -63,6 +65,9 @@ export default function LibraryScreen() {
       const matchesSearch = !needle || haystack.includes(needle);
       const matchesFilter =
         filter === 'ALL' ||
+        // Ролики и картинки перемешивались в одном списке — теперь их можно развести.
+        (filter === 'VIDEO' && kindForMode(item.mode) === 'VIDEO') ||
+        (filter === 'IMAGE' && kindForMode(item.mode) === 'IMAGE') ||
         (filter === 'READY' && item.status === 'COMPLETED') ||
         (filter === 'ACTIVE' && (item.status === 'QUEUED' || item.status === 'PROCESSING')) ||
         (filter === 'PUBLISHED' && item.video?.visibility === 'PUBLIC') ||
@@ -73,6 +78,8 @@ export default function LibraryScreen() {
 
   const filters = [
     { value: 'ALL', label: t('filterAll') },
+    { value: 'VIDEO', label: t('kindVideoTab') },
+    { value: 'IMAGE', label: t('kindImageTab') },
     { value: 'ACTIVE', label: t('filterActive') },
     { value: 'READY', label: t('filterReady') },
     { value: 'PUBLISHED', label: t('filterPublished') },

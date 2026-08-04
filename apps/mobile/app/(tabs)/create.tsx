@@ -22,6 +22,7 @@ import {
 import {
   describeGenerationCost,
   modeIsImageInput,
+  type GenerationKind,
   type GenerationMode,
   type GenerationModelInfo,
   type Resolution,
@@ -209,6 +210,13 @@ export default function CreateScreen() {
     models.data?.models.find((model) => model.id === state.modelId) ?? models.data?.models[0];
   // Картинка — это другой набор настроек: длительности, звука и камеры у неё нет.
   const isImage = activeModel?.kind === 'IMAGE';
+  const kind: GenerationKind = isImage ? 'IMAGE' : 'VIDEO';
+  /**
+   * Выбор «видео или картинка» стоит выше выбора модели: модели для роликов и
+   * для картинок не взаимозаменяемы, и показывать их одним списком — значит
+   * предлагать заведомо неподходящий вариант.
+   */
+  const modelsForKind = (models.data?.models ?? []).filter((model) => model.kind === kind);
   const aspectOptions = activeModel?.aspectRatios ?? ['9:16'];
   const resolutionOptions = activeModel?.resolutions ?? ['720p'];
   const durationOptions = activeModel?.durations ?? [5];
@@ -321,6 +329,13 @@ export default function CreateScreen() {
     setModelOpen(false);
   };
 
+  /** Переключение между роликами и картинками — это смена модели на подходящую. */
+  const selectKind = (next: GenerationKind) => {
+    if (next === kind) return;
+    const target = (models.data?.models ?? []).find((model) => model.kind === next);
+    if (target) selectModel(target);
+  };
+
   const setTimingMode = (mode: TimingMode) => {
     state.set('timingMode', mode);
     // Точные кадры умеет только модель с их поддержкой — переключаемся на неё автоматически.
@@ -381,6 +396,15 @@ export default function CreateScreen() {
             eyebrow={activeModel ? `${activeModel.label} · ${activeModel.provider}` : undefined}
             title={t('createTitle')}
             action={<KlyvoCreditBadge amount={available} />}
+          />
+
+          <KlyvoSegmentedControl
+            value={kind}
+            options={[
+              { value: 'VIDEO' as const, label: t('kindVideoTab') },
+              { value: 'IMAGE' as const, label: t('kindImageTab') },
+            ]}
+            onChange={selectKind}
           />
 
           {/* Пользователь всегда видит, какой моделью генерирует, и может её сменить. */}
@@ -715,7 +739,7 @@ export default function CreateScreen() {
         onClose={() => setModelOpen(false)}
       >
         <View style={styles.modelList}>
-          {(models.data?.models ?? []).map((model) => {
+          {modelsForKind.map((model) => {
             const selected = model.id === state.modelId;
             return (
               <Pressable
@@ -733,7 +757,6 @@ export default function CreateScreen() {
                 </View>
                 <Text style={styles.hint}>{model.description}</Text>
                 <View style={styles.wrap}>
-                  <KlyvoChip label={model.kind === 'IMAGE' ? t('kindImage') : t('kindVideo')} />
                   <KlyvoChip label={model.connected ? t('modelConnected') : t('modelMock')} />
                   {model.kind === 'VIDEO' ? (
                     <KlyvoChip label={model.resolutions.join(' · ')} />
