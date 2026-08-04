@@ -3,12 +3,19 @@ import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 
 const metroHost = Constants.expoConfig?.hostUri?.split(':')[0];
-const configuredApiUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://10.0.2.2:4000';
 
-export const API_URL = (__DEV__ && metroHost ? `http://${metroHost}:4000` : configuredApiUrl).replace(
-  /\/$/u,
-  '',
-);
+/**
+ * Адрес API.
+ *
+ * Заданный явно `EXPO_PUBLIC_API_URL` важнее всего остального: иначе приложение,
+ * запущенное через Expo Go, всегда стучалось бы на компьютер с Metro и не могло
+ * подключиться к серверу на хостинге. Если переменной нет, адрес определяется сам —
+ * по хосту Metro в разработке и по адресу эмулятора Android как последний вариант.
+ */
+const configuredApiUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
+const detectedApiUrl = metroHost ? `http://${metroHost}:4000` : 'http://10.0.2.2:4000';
+
+export const API_URL = (configuredApiUrl || detectedApiUrl).replace(/\/$/u, '');
 
 const DEVICE_KEY = 'klyvo.deviceId';
 let cachedDeviceId: string | null = null;
